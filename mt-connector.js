@@ -138,8 +138,8 @@ class MTConnector extends EventEmitter {
     this.cdp.on('Network.webSocketCreated', ({ requestId, url }) => {
       this._wsMap.set(requestId, url);
       console.log(`🔌 CDP: WS 建立 ${url}`);
-      // 接受多種 MT WS 路徑
-      if (url.includes('/game/ws') || url.includes('ws.') || url.includes('/ws') || url.includes('socket')) {
+      // 接受 MT 相關的 WS（rbjork/ofalive/playerhub/doubledragon 等）
+      if (url.includes('rbjork') || url.includes('ofalive') || url.includes('/game/ws') || url.includes('playerhub') || url.includes('doubledragon')) {
         console.log(`✅ MT連線器: Game WebSocket 已連線 ${url}`);
         this.connected = true;
         this._gameWsId = requestId;
