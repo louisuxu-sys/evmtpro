@@ -590,22 +590,8 @@ server.listen(PORT, () => {
   console.log(`🔌 MT連線: ${mtConnector.pageUrl}`);
   console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
 
-  // 自動登入或啟動瀏覽器
-  console.log(`🔑 管理員介面: /admin/login?key=${ADMIN_KEY}`);
-  if (process.env.MT_CASINO_USERNAME && process.env.MT_CASINO_PASSWORD) {
-    console.log('🤖 偵測到自動登入設定，啟動自動登入...');
-    mtConnector.autoLogin().then(ok => {
-      if (ok) console.log('🎉 自動登入成功！系統已開始監控');
-      else console.log('⚠️  自動登入未完成，請到管理員介面手動操作');
-    }).catch(err => {
-      console.error('❌ 自動登入失敗:', err.message);
-    });
-  } else {
-    console.log('🔌 MT: 啟動雲端瀏覽器...');
-    mtConnector.launchBrowser().then(() => {
-      console.log('✅ 瀏覽器就緒，請到管理員介面登入 MT');
-    }).catch(err => {
-      console.error('❌ 瀏覽器啟動失敗:', err.message);
-    });
-  }
+  // 混合模式：不在雲端啟動瀏覽器，等待本地 Chrome 擴充功能轉發 MT 資料
+  console.log('📡 模式: 混合模式（Render LINE BOT + 本地瀏覽器擴充功能）');
+  console.log('🔌 等待 Chrome 擴充功能轉發 MT 資料...');
+  console.log(`📡 擴充功能目標: POST /api/mt/ingest`);
 });

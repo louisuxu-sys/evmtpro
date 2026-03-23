@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "百家之眼 - MT 資料轉發",
+  "version": "1.0.0",
+  "description": "攔截 MT 百家樂 WebSocket 資料並轉發到雲端伺服器",
+  "permissions": ["storage"],
+  "host_permissions": ["*://*.ofalive99.net/*"],
+  "content_scripts": [
+    {
+      "matches": ["*://*.ofalive99.net/*"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  }
+}

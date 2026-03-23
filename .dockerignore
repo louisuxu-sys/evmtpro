@@ -4,3 +4,4 @@ node_modules
 .mt-localstorage.json
 .env
 mt-debug*.json
+extension
