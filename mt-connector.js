@@ -354,87 +354,63 @@ class MTConnector extends EventEmitter {
         };
       });
 
-      // 找 MT真人 — 優先找最小的匹配元素（避免匹配到大容器）
-      const mtPos = await this.page.evaluate(() => {
+      // 找 MT真人 — 用 JS click 直接點（新分頁由 targetcreated 自動處理）
+      const mtClicked = await this.page.evaluate(() => {
+        // 策略1: 找「開始登入 MT」「進入MT」「前往MT」按鈕
+        const btns = Array.from(document.querySelectorAll('a, button, div, span'));
+        for (const el of btns) {
+          const text = (el.textContent || '').trim();
+          if ((text.includes('開始') || text.includes('進入') || text.includes('前往') || text.includes('登入')) && text.includes('MT')) {
+            const rect = el.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+              el.click();
+              return { clicked: true, text: text.substring(0, 40), tag: el.tagName, method: 'direct-btn' };
+            }
+          }
+        }
+
+        // 策略2: 找最小的包含「MT真人」或「MT 真人」的可點擊元素
         let best = null;
         let bestArea = Infinity;
-        const all = Array.from(document.querySelectorAll('a, div, span, button, img, li, p'));
+        const all = Array.from(document.querySelectorAll('a, div, span, button, img, li'));
         for (const el of all) {
           const text = (el.textContent || el.alt || el.title || '').trim();
           if (!text.includes('MT')) continue;
           if (!text.includes('真人') && !text.includes('live') && !text.includes('Live')) continue;
           const rect = el.getBoundingClientRect();
           if (rect.width <= 0 || rect.height <= 0) continue;
+          // 排除太大的元素(大於500px寬的可能是容器)
+          if (rect.width > 500) continue;
           const area = rect.width * rect.height;
-          // 選最小的可見匹配元素（更精確）
-          if (area < bestArea && area > 100) {
+          if (area < bestArea && area > 50) {
             bestArea = area;
-            best = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2, w: rect.width, h: rect.height, text: text.substring(0, 40), tag: el.tagName };
+            best = el;
           }
         }
-        // 備用：data 屬性
-        if (!best) {
-          const imgs = Array.from(document.querySelectorAll('[data-code*="mt"], [data-code*="MT"], [alt*="MT"]'));
-          for (const el of imgs) {
-            const rect = el.getBoundingClientRect();
-            if (rect.width > 0 && rect.height > 0) {
-              best = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2, w: rect.width, h: rect.height, text: 'data/alt match', tag: el.tagName };
-              break;
-            }
-          }
+        if (best) {
+          best.click();
+          const r = best.getBoundingClientRect();
+          return { clicked: true, text: (best.textContent || '').trim().substring(0, 40), tag: best.tagName, method: 'smallest-el', x: Math.round(r.x + r.width/2), y: Math.round(r.y + r.height/2) };
         }
-        // 如果元素在視窗外，先捲動到它
-        if (best && (best.x < 0 || best.y < 0 || best.x > window.innerWidth || best.y > window.innerHeight)) {
-          // 重新取得元素位置（捲動後）
-          for (const el of all) {
-            const text = (el.textContent || el.alt || '').trim();
-            if (text.includes('MT') && (text.includes('真人') || text.includes('live'))) {
-              const rect = el.getBoundingClientRect();
-              const area = rect.width * rect.height;
-              if (area === bestArea) {
-                el.scrollIntoView({ block: 'center', inline: 'center' });
-                break;
-              }
-            }
-          }
+
+        // 策略3: data 屬性
+        const dataEls = Array.from(document.querySelectorAll('[data-code*="mt"], [data-code*="MT"], [alt*="MT"]'));
+        if (dataEls.length > 0) {
+          dataEls[0].click();
+          return { clicked: true, text: 'data/alt match', tag: dataEls[0].tagName, method: 'data-attr' };
         }
-        return best;
+
+        return { clicked: false };
       });
 
-      if (!mtPos) {
+      if (!mtClicked.clicked) {
         console.log('⚠️  自動登入: 找不到 MT真人按鈕');
         this._loginMode = true;
         return false;
       }
 
-      // 如果座標在視窗外，先等捲動完成再取新座標
-      await this._sleep(500);
-      const finalPos = await this.page.evaluate((origText) => {
-        const all = Array.from(document.querySelectorAll('a, div, span, button, img, li, p'));
-        let best = null;
-        let bestArea = Infinity;
-        for (const el of all) {
-          const text = (el.textContent || el.alt || '').trim();
-          if (!text.includes('MT') || (!text.includes('真人') && !text.includes('live'))) continue;
-          const rect = el.getBoundingClientRect();
-          if (rect.width <= 0 || rect.height <= 0) continue;
-          const area = rect.width * rect.height;
-          if (area < bestArea && area > 100 && rect.x >= 0 && rect.y >= 0) {
-            bestArea = area;
-            best = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2, text: text.substring(0, 40), tag: el.tagName };
-          }
-        }
-        return best;
-      });
-
-      const clickTarget = (finalPos && finalPos.x > 0 && finalPos.y > 0) ? finalPos : mtPos;
-      console.log(`✅ 自動登入: 找到 MT真人 [${clickTarget.text}] <${clickTarget.tag}> at (${Math.round(clickTarget.x)},${Math.round(clickTarget.y)})`);
-
-      // 記錄當前頁面數量
+      console.log(`✅ 自動登入: 已點擊 MT真人 [${mtClicked.text}] <${mtClicked.tag}> (${mtClicked.method})`);
       const pagesBefore = (await this.browser.pages()).length;
-      // 真實滑鼠點擊
-      await this.page.mouse.click(clickTarget.x, clickTarget.y);
-      console.log('🖱️ 自動登入: 已點擊 MT真人');
 
       // 5.5 點擊 MT 後可能出現確認彈窗
       console.log('📢 自動登入: 檢查 MT 進入確認彈窗...');
