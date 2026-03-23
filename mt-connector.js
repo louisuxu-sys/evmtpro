@@ -666,19 +666,22 @@ class MTConnector extends EventEmitter {
 
       this.handleMessage(msg);
     } catch (err) {
-      // 非 JSON 訊息 - 可能是 SignalR 格式
-      // SignalR 用 \x1e (Record Separator) 分隔訊息
-      if (typeof rawData === 'string' && rawData.includes('\x1e')) {
-        const parts = rawData.split('\x1e').filter(p => p.trim());
-        for (const part of parts) {
-          try {
-            const msg = JSON.parse(part);
-            if (this.logMessages) {
-              this.messageLog.push({ time: new Date().toISOString(), wsUrl, msg });
-              if (this.messageLog.length > 500) this.messageLog.shift();
-            }
-            this.handleMessage(msg);
-          } catch (e) {}
+      // 非 JSON 訊息 - 可能是 SignalR 格式或其他分隔格式
+      if (typeof rawData === 'string') {
+        // SignalR 用 \x1e (Record Separator) 分隔
+        const sep = rawData.includes('\x1e') ? '\x1e' : null;
+        if (sep) {
+          const parts = rawData.split(sep).filter(p => p.trim());
+          for (const part of parts) {
+            try {
+              const msg = JSON.parse(part);
+              if (this.logMessages) {
+                this.messageLog.push({ time: new Date().toISOString(), wsUrl, msg });
+                if (this.messageLog.length > 500) this.messageLog.shift();
+              }
+              this.handleMessage(msg);
+            } catch (e) {}
+          }
         }
       }
     }
@@ -689,6 +692,12 @@ class MTConnector extends EventEmitter {
     // === SignalR 格式: { type: 1, target: "MethodName", arguments: [...] } ===
     if (msg.type === 1 && msg.target && msg.arguments) {
       this._handleSignalRMessage(msg);
+      return;
+    }
+
+    // === doubledragon 格式: { D: { Summary: {...}, List: [...] }, C: 301, SI: "gc023002" } ===
+    if (msg.D && msg.SI) {
+      this._handleDDMessage(msg);
       return;
     }
 
@@ -737,6 +746,160 @@ class MTConnector extends EventEmitter {
         actionName.includes('/logout') || actionName.includes('/banner')) {
       return;
     }
+  }
+
+  // ===== doubledragon 格式處理 =====
+  _handleDDMessage(msg) {
+    const d = msg.D;
+    const tableId = msg.SI; // e.g. "gc023002"
+    const tableNum = msg.C; // e.g. 301
+
+    if (!tableId) return;
+
+    // Summary 訊息 — 包含牌桌統計 + 歷史記錄
+    if (d.Summary) {
+      const summary = d.Summary;
+      const tableName = `百家樂 ${tableNum || tableId}`;
+
+      // 建立/更新牌桌
+      if (!this.tables.has(tableId)) {
+        const info = {
+          tableId,
+          tableName,
+          dealer: { name: '未知荷官' },
+          shoe: null,
+          round: summary.Total || 0,
+          state: 'active',
+          hall: '',
+          summary: {
+            total: summary.Total || 0,
+            banker: summary.Banker || 0,
+            player: summary.Player || 0,
+            tie: summary.Tie || 0,
+          }
+        };
+        this.tables.set(tableId, info);
+        console.log(`📋 DD: 新牌桌 ${tableName} (${tableId}) 共${summary.Total}局 莊${summary.Banker} 閒${summary.Player} 和${summary.Tie}`);
+      } else {
+        // 更新統計
+        const info = this.tables.get(tableId);
+        info.summary = {
+          total: summary.Total || 0,
+          banker: summary.Banker || 0,
+          player: summary.Player || 0,
+          tie: summary.Tie || 0,
+        };
+        info.round = summary.Total || 0;
+      }
+
+      // 發出牌桌列表更新
+      this.emit('tables_list', Array.from(this.tables.values()));
+
+      // 如果 List 包含最新一局的牌面資料
+      if (d.List && Array.isArray(d.List) && d.List.length > 0) {
+        const lastRound = d.List[d.List.length - 1];
+        this._processDDRound(tableId, lastRound, summary);
+      }
+    }
+
+    // 帶牌面的開牌結果
+    // 格式: D.List 含 P1-P3(閒牌), B1-B3(莊牌), WB(莊點), WP(閒點)
+    if (d.P1 !== undefined || d.Total !== undefined) {
+      // 完整開牌訊息
+      this._processDDFullResult(tableId, d);
+    }
+  }
+
+  // 處理 DD 單局結果
+  _processDDRound(tableId, round, summary) {
+    if (!round) return;
+    // round 格式: { A: 局號, G: "B"/"P"/"T", P: 點數 }
+    const winner = round.G === 'B' ? 'B' : round.G === 'P' ? 'P' : 'T';
+
+    // 記錄但不 emit（因為沒有完整牌面資料）
+    // 只在有完整牌面時才 emit game_result
+  }
+
+  // 處理 DD 完整開牌結果（帶 6 張牌面）
+  _processDDFullResult(tableId, d) {
+    // 格式: Total, P1-P4(閒), B1-B4(莊), WP(閒點), WB(莊點), W(贏家)
+    // 或: Total, Banker, Player, Tie, List[{A,P1,P2,P3,P4,B1,B2,B3,B4,WB,WP}]
+    let playerCards = [];
+    let bankerCards = [];
+
+    // 嘗試讀取牌面
+    if (d.P1 !== undefined) {
+      [d.P1, d.P2, d.P3].forEach(c => {
+        if (c && typeof c === 'object' && c.length === 2) {
+          // 牌面格式可能是 [花色, 點數] 或數字
+          playerCards.push(this._parseDDCard(c));
+        } else if (typeof c === 'number' && c > 0) {
+          playerCards.push(this.decodeCardNumber(c));
+        }
+      });
+      [d.B1, d.B2, d.B3].forEach(c => {
+        if (c && typeof c === 'object' && c.length === 2) {
+          bankerCards.push(this._parseDDCard(c));
+        } else if (typeof c === 'number' && c > 0) {
+          bankerCards.push(this.decodeCardNumber(c));
+        }
+      });
+    }
+
+    // List 格式中的牌面
+    if (d.List && Array.isArray(d.List)) {
+      for (const item of d.List) {
+        // 帶完整牌面的 List item
+        if (item.P1 !== undefined && Array.isArray(item.P1)) {
+          playerCards = [item.P1, item.P2, item.P3].filter(c => c).map(c => this._parseDDCard(c));
+          bankerCards = [item.B1, item.B2, item.B3].filter(c => c).map(c => this._parseDDCard(c));
+
+          const winner = this.normalizeWinner(item.W || item.G || '');
+          const playerTotal = item.WP !== undefined ? item.WP : this.calcTotal(playerCards);
+          const bankerTotal = item.WB !== undefined ? item.WB : this.calcTotal(bankerCards);
+
+          if (playerCards.length > 0) {
+            console.log(`🃏 DD開牌: ${tableId} 第${item.A || '?'}局 ` +
+              `閒[${playerCards.map(c => this.formatCard(c)).join(' ')}]=${playerTotal} ` +
+              `莊[${bankerCards.map(c => this.formatCard(c)).join(' ')}]=${bankerTotal} ` +
+              `→ ${winner === 'B' ? '莊贏' : winner === 'P' ? '閒贏' : '和'}`);
+
+            this.emit('game_result', {
+              tableId,
+              shoe: null,
+              round: item.A,
+              playerCards,
+              bankerCards,
+              playerTotal,
+              bankerTotal,
+              winner,
+              playerPair: playerCards.length >= 2 && playerCards[0]?.rank === playerCards[1]?.rank,
+              bankerPair: bankerCards.length >= 2 && bankerCards[0]?.rank === bankerCards[1]?.rank,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // 解析 DD 牌面格式
+  _parseDDCard(c) {
+    if (!c) return null;
+    // 如果是數字，用 decodeCardNumber
+    if (typeof c === 'number') return this.decodeCardNumber(c);
+    // 如果是字串如 "6.0" "8.9" — 格式待確認
+    if (typeof c === 'string') {
+      const parts = c.split('.');
+      if (parts.length === 2) {
+        return { rank: parseInt(parts[0]) || 0, suit: 's' };
+      }
+    }
+    // 如果是陣列 [花色, 點數]
+    if (Array.isArray(c) && c.length >= 2) {
+      const suits = ['s', 'h', 'c', 'd'];
+      return { rank: parseInt(c[1]) || 0, suit: suits[parseInt(c[0])] || 's' };
+    }
+    return null;
   }
 
   // ===== SignalR 訊息處理 =====
