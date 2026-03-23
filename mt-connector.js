@@ -43,6 +43,7 @@ class MTConnector extends EventEmitter {
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-gpu',
+        '--disable-popup-blocking',
         '--window-size=1280,800'
       ],
       ignoreDefaultArgs: ['--enable-automation']
@@ -306,27 +307,61 @@ class MTConnector extends EventEmitter {
       console.log('🎰 自動登入: 尋找 MT真人...');
       await this._sleep(2000);
 
-      const mtClicked = await this.page.evaluate(() => {
-        // 找包含 MT 的元素
+      // 攔截 window.open，記錄 popup URL
+      await this.page.evaluate(() => {
+        window.__popupUrl = null;
+        const origOpen = window.open;
+        window.open = function(url, ...args) {
+          window.__popupUrl = url;
+          console.log('POPUP_INTERCEPTED:' + url);
+          return origOpen.call(this, url, ...args);
+        };
+      });
+
+      // 用真實滑鼠點擊（不用 JS click，避免 popup 被擋）
+      const mtPos = await this.page.evaluate(() => {
         const all = Array.from(document.querySelectorAll('a, div, span, button, img, li'));
         for (const el of all) {
           const text = (el.textContent || el.alt || el.title || '').trim();
           if (text.includes('MT') && (text.includes('真人') || text.includes('live') || text.includes('Live'))) {
-            el.click();
-            return { clicked: true, text, tag: el.tagName };
+            const rect = el.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+              return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2, text: text.substring(0, 30), tag: el.tagName };
+            }
           }
         }
-        // 也嘗試找圖片 alt 或 data 屬性
+        // 也嘗試找 data 屬性
         const imgs = Array.from(document.querySelectorAll('[data-code*="mt"], [data-code*="MT"], [alt*="MT"]'));
         if (imgs.length > 0) {
-          imgs[0].click();
-          return { clicked: true, text: 'data/alt match', tag: imgs[0].tagName };
+          const rect = imgs[0].getBoundingClientRect();
+          return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2, text: 'data/alt match', tag: imgs[0].tagName };
         }
-        return { clicked: false };
+        return null;
       });
 
-      if (mtClicked.clicked) {
-        console.log(`✅ 自動登入: 已點擊 MT真人 [${mtClicked.text}] <${mtClicked.tag}>`);
+      if (mtPos) {
+        console.log(`✅ 自動登入: 找到 MT真人 [${mtPos.text}] <${mtPos.tag}> at (${Math.round(mtPos.x)},${Math.round(mtPos.y)})`);
+        // 記錄當前頁面數量
+        const pagesBefore = (await this.browser.pages()).length;
+        // 真實滑鼠點擊
+        await this.page.mouse.click(mtPos.x, mtPos.y);
+        console.log('🖱️ 自動登入: 已點擊 MT真人');
+
+        // 等待 popup 視窗出現
+        await this._sleep(5000);
+        const pagesAfter = (await this.browser.pages()).length;
+        console.log(`📄 自動登入: 頁面數 ${pagesBefore} -> ${pagesAfter}`);
+
+        // 如果沒有新頁面，嘗試用攔截到的 popup URL 直接導航
+        if (pagesAfter <= pagesBefore) {
+          const popupUrl = await this.page.evaluate(() => window.__popupUrl);
+          if (popupUrl) {
+            console.log(`🔗 自動登入: popup 被擋，直接導航到 ${popupUrl}`);
+            await this.page.goto(popupUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+          } else {
+            console.log('⚠️  自動登入: 沒有偵測到新視窗或 popup URL');
+          }
+        }
       } else {
         console.log('⚠️  自動登入: 找不到 MT真人按鈕');
         console.log('   請到管理員介面手動點擊: /admin/login?key=ADMIN_KEY');
@@ -334,7 +369,7 @@ class MTConnector extends EventEmitter {
         return false;
       }
 
-      // 6. 等待 MT 載入 + popup 視窗
+      // 6. 等待 MT 載入
       console.log('⏳ 自動登入: 等待 MT 載入...');
       await this._sleep(8000);
 
