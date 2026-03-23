@@ -438,37 +438,50 @@ class MTConnector extends EventEmitter {
         }
       }
 
-      // 等待 popup 視窗出現
-      await this._sleep(5000);
-      const pagesAfter = (await this.browser.pages()).length;
-      console.log(`📄 自動登入: 頁面數 ${pagesBefore} -> ${pagesAfter}`);
-
-      // 如果有新頁面，targetcreated 會自動切換
-      // 如果沒有新頁面，嘗試用攔截到的 popup URL 直接導航
-      if (pagesAfter <= pagesBefore) {
-        const popupUrl = await this.page.evaluate(() => window.__popupUrl);
-        if (popupUrl) {
-          console.log(`🔗 自動登入: popup 被擋，直接導航到 ${popupUrl}`);
-          await this.page.goto(popupUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        } else {
-          console.log('⚠️  自動登入: 沒有偵測到新視窗，嘗試直接進入 MT...');
-          // 最後手段：直接導航到 MT 頁面
-          await this.page.goto(this.pageUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      // 等待 popup 視窗出現或 WS 連線
+      console.log('⏳ 自動登入: 等待 MT 視窗或 WebSocket...');
+      for (let w = 0; w < 15; w++) {
+        await this._sleep(2000);
+        if (this.connected) {
+          console.log('🎉 自動登入: 成功！MT WebSocket 已連線');
+          return true;
+        }
+        // 檢查是否有新頁面
+        const pagesNow = (await this.browser.pages()).length;
+        if (pagesNow > pagesBefore) {
+          console.log(`📄 自動登入: 偵測到新頁面 (${pagesBefore} -> ${pagesNow})`);
+          // targetcreated 會自動切換並 attach CDP
+          break;
         }
       }
 
-      // 6. 等待 MT 載入
-      console.log('⏳ 自動登入: 等待 MT 載入...');
-      await this._sleep(8000);
-
+      // 如果已連線，直接返回
       if (this.connected) {
         console.log('🎉 自動登入: 成功！MT WebSocket 已連線');
         return true;
       }
 
-      // 等更久一點
-      console.log('⏳ 自動登入: 繼續等待 WebSocket...');
-      for (let i = 0; i < 10; i++) {
+      // 檢查頁面數
+      const pagesAfter = (await this.browser.pages()).length;
+      console.log(`📄 自動登入: 頁面數 ${pagesBefore} -> ${pagesAfter}`);
+
+      // 如果沒有新頁面且未連線，嘗試用攔截到的 popup URL
+      if (pagesAfter <= pagesBefore && !this.connected) {
+        const popupUrl = await this.page.evaluate(() => window.__popupUrl).catch(() => null);
+        if (popupUrl) {
+          console.log(`🔗 自動登入: 用 popup URL 導航: ${popupUrl}`);
+          await this.page.goto(popupUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+          // 重新 attach CDP
+          await this._attachCDP(this.page);
+        } else {
+          console.log('⚠️  自動登入: 沒有偵測到新視窗或 popup URL');
+          console.log('   不做 fallback 導航，避免破壞現有連線');
+        }
+      }
+
+      // 最後等待 WebSocket
+      console.log('⏳ 自動登入: 等待 MT WebSocket...');
+      for (let i = 0; i < 15; i++) {
         await this._sleep(3000);
         if (this.connected) {
           console.log('🎉 自動登入: 成功！MT WebSocket 已連線');
