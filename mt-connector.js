@@ -646,11 +646,14 @@ class MTConnector extends EventEmitter {
 
   // 處理從瀏覽器收到的 WebSocket 訊息
   _onWsMessage(wsUrl, rawData) {
-    // 記錄前 20 筆原始訊息
+    // 記錄前 50 筆原始訊息（排除空的和心跳）
     if (!this._rawMsgCount) this._rawMsgCount = 0;
-    this._rawMsgCount++;
-    if (this._rawMsgCount <= 20) {
-      console.log(`📩 WS原始[${this._rawMsgCount}] (${wsUrl.substring(0, 50)}): ${String(rawData).substring(0, 300)}`);
+    const dataStr = String(rawData).trim();
+    if (dataStr.length > 5 && dataStr !== '{}') {
+      this._rawMsgCount++;
+      if (this._rawMsgCount <= 50) {
+        console.log(`📩 WS原始[${this._rawMsgCount}] (${wsUrl.substring(wsUrl.lastIndexOf('/'), wsUrl.lastIndexOf('/') + 30)}): ${dataStr.substring(0, 500)}`);
+      }
     }
 
     try {
