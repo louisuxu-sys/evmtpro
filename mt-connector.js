@@ -232,7 +232,45 @@ class MTConnector extends EventEmitter {
       // 1. 打開娛樂城
       console.log(`🌐 自動登入: 前往 ${casinoUrl}`);
       await this.page.goto(casinoUrl, { waitUntil: 'networkidle2', timeout: 30000 });
-      await this._sleep(2000);
+      await this._sleep(5000);
+
+      // 診斷頁面狀態
+      const loginDiag = await this.page.evaluate(() => {
+        const inputs = document.querySelectorAll('input');
+        const iframes = document.querySelectorAll('iframe');
+        return {
+          url: location.href,
+          title: document.title,
+          inputCount: inputs.length,
+          iframeCount: iframes.length,
+          iframeSrcs: Array.from(iframes).map(f => f.src || '').slice(0, 5),
+          bodyLen: document.body?.innerHTML?.length || 0,
+          bodyText: document.body?.innerText?.substring(0, 200) || ''
+        };
+      });
+      console.log(`🔍 登入頁診斷: URL=${loginDiag.url} inputs=${loginDiag.inputCount} iframes=${loginDiag.iframeCount} bodyLen=${loginDiag.bodyLen}`);
+      console.log(`🔍 登入頁診斷: title=${loginDiag.title}`);
+      if (loginDiag.iframeCount > 0) {
+        console.log(`🔍 登入頁 iframes: ${JSON.stringify(loginDiag.iframeSrcs)}`);
+      }
+      console.log(`🔍 登入頁 body: ${loginDiag.bodyText.substring(0, 100)}`);
+
+      // 如果主頁面沒有 input，檢查 iframe
+      if (loginDiag.inputCount === 0 && loginDiag.iframeCount > 0) {
+        console.log('🔍 自動登入: 主頁面無 input，檢查 iframe...');
+        for (const frame of this.page.frames()) {
+          const fInputs = await frame.evaluate(() => document.querySelectorAll('input').length).catch(() => 0);
+          if (fInputs > 0) {
+            console.log(`🔍 找到 iframe 有 ${fInputs} 個 input: ${frame.url().substring(0, 80)}`);
+          }
+        }
+      }
+
+      // 如果沒有 input，等更久再試
+      if (loginDiag.inputCount === 0) {
+        console.log('⏳ 自動登入: 等待頁面完全載入...');
+        await this._sleep(5000);
+      }
 
       // 2. 尋找帳號密碼欄位並填入
       console.log('🔑 自動登入: 填入帳號密碼...');
