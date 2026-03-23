@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: evpro-monitor
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: LINE_CHANNEL_SECRET
+        sync: false
+      - key: LINE_CHANNEL_ACCESS_TOKEN
+        sync: false
+      - key: ADMIN_KEY
+        sync: false
+      - key: MT_PAGE_URL
+        value: https://gsa.ofalive99.net

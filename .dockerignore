@@ -1,0 +1,6 @@
+node_modules
+.mt-browser-data
+.mt-cookies.json
+.mt-localstorage.json
+.env
+mt-debug*.json

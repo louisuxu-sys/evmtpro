@@ -1,0 +1,1884 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>百家之眼 - 全廳監控</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --bg-primary: #0a0e27;
+            --bg-secondary: #111640;
+            --bg-card: #161b4a;
+            --bg-card-hover: #1c2260;
+            --border: #2a2f6e;
+            --text-primary: #e8eaff;
+            --text-secondary: #8b8fc7;
+            --accent-blue: #4a7dff;
+            --accent-cyan: #00d4ff;
+            --banker-red: #ff4757;
+            --banker-red-bg: rgba(255, 71, 87, 0.15);
+            --player-blue: #2ed6ff;
+            --player-blue-bg: rgba(46, 214, 255, 0.15);
+            --tie-green: #2ecc71;
+            --tie-green-bg: rgba(46, 204, 113, 0.15);
+            --positive: #00e676;
+            --negative: #ff5252;
+            --gold: #ffd700;
+        }
+
+        body {
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* ===== 頂部導航 ===== */
+        .navbar {
+            background: linear-gradient(135deg, #0d1240, #1a1f5e);
+            border-bottom: 1px solid var(--border);
+            padding: 12px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            backdrop-filter: blur(10px);
+        }
+
+        .navbar-brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .navbar-logo {
+            font-size: 28px;
+        }
+
+        .navbar-title {
+            font-size: 20px;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue));
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .navbar-subtitle {
+            font-size: 11px;
+            color: var(--text-secondary);
+            letter-spacing: 2px;
+        }
+
+        .navbar-status {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .status-online {
+            background: rgba(0, 230, 118, 0.15);
+            color: var(--positive);
+            border: 1px solid rgba(0, 230, 118, 0.3);
+        }
+
+        .status-offline {
+            background: rgba(255, 82, 82, 0.15);
+            color: var(--negative);
+            border: 1px solid rgba(255, 82, 82, 0.3);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        .status-online .status-dot { background: var(--positive); }
+        .status-offline .status-dot { background: var(--negative); }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        /* ===== 統計欄 ===== */
+        .stats-bar {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+            padding: 16px 24px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .stat-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 14px 18px;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .stat-icon {
+            font-size: 28px;
+            width: 48px;
+            height: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 12px;
+        }
+
+        .stat-icon.tables { background: rgba(74, 125, 255, 0.15); }
+        .stat-icon.hands { background: rgba(255, 215, 0, 0.15); }
+        .stat-icon.alerts { background: rgba(255, 71, 87, 0.15); }
+        .stat-icon.line { background: rgba(0, 185, 0, 0.15); }
+
+        .stat-info { flex: 1; }
+
+        .stat-label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .stat-value {
+            font-size: 22px;
+            font-weight: 700;
+            margin-top: 2px;
+        }
+
+        /* ===== 控制列 ===== */
+        .controls-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 24px;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .controls-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .view-toggle {
+            display: flex;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .view-btn {
+            padding: 8px 16px;
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+
+        .view-btn.active {
+            background: var(--accent-blue);
+            color: white;
+        }
+
+        .filter-select {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            padding: 8px 14px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+
+        .controls-right {
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn {
+            padding: 8px 18px;
+            border: none;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent-blue), #6a5aff);
+            color: white;
+        }
+
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 15px rgba(74, 125, 255, 0.4); }
+
+        .btn-danger {
+            background: rgba(255, 71, 87, 0.15);
+            color: var(--banker-red);
+            border: 1px solid rgba(255, 71, 87, 0.3);
+        }
+
+        .btn-success {
+            background: rgba(0, 185, 0, 0.15);
+            color: #00b900;
+            border: 1px solid rgba(0, 185, 0, 0.3);
+        }
+
+        /* ===== 桌台網格 ===== */
+        .tables-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+            gap: 16px;
+            padding: 0 24px 24px;
+        }
+
+        .table-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            overflow: hidden;
+            transition: all 0.3s;
+            cursor: pointer;
+        }
+
+        .table-card:hover {
+            border-color: var(--accent-blue);
+            box-shadow: 0 4px 20px rgba(74, 125, 255, 0.15);
+            transform: translateY(-2px);
+        }
+
+        .table-card.alert {
+            border-color: var(--gold);
+            box-shadow: 0 0 20px rgba(255, 215, 0, 0.2);
+            animation: alertGlow 2s infinite;
+        }
+
+        @keyframes alertGlow {
+            0%, 100% { box-shadow: 0 0 20px rgba(255, 215, 0, 0.1); }
+            50% { box-shadow: 0 0 30px rgba(255, 215, 0, 0.3); }
+        }
+
+        .table-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            background: linear-gradient(135deg, rgba(74, 125, 255, 0.1), transparent);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .table-name {
+            font-size: 15px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .table-hand-count {
+            font-size: 11px;
+            color: var(--text-secondary);
+            background: var(--bg-primary);
+            padding: 3px 10px;
+            border-radius: 10px;
+        }
+
+        .table-stats {
+            display: flex;
+            gap: 12px;
+            padding: 10px 16px;
+            font-size: 12px;
+        }
+
+        .table-stat {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .stat-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+
+        .stat-dot.banker { background: var(--banker-red); }
+        .stat-dot.player { background: var(--player-blue); }
+        .stat-dot.tie { background: var(--tie-green); }
+
+        /* ===== 路紙 (Road Map) ===== */
+        .road-container {
+            padding: 8px 16px;
+            overflow-x: auto;
+        }
+
+        .road-grid {
+            display: flex;
+            gap: 3px;
+            min-height: 80px;
+            align-items: flex-start;
+        }
+
+        .road-column {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .road-cell {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 7px;
+            font-weight: 700;
+            color: white;
+            flex-shrink: 0;
+        }
+
+        .road-cell.B { background: var(--banker-red); }
+        .road-cell.P { background: var(--player-blue); }
+        .road-cell.T {
+            background: transparent;
+            border: 2px solid var(--tie-green);
+            width: 14px;
+            height: 14px;
+        }
+
+        /* ===== 珠盤路 ===== */
+        .bead-road {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 3px;
+            padding: 8px 16px;
+        }
+
+        .bead-cell {
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 9px;
+            font-weight: 700;
+            color: white;
+        }
+
+        .bead-cell.B { background: var(--banker-red); }
+        .bead-cell.P { background: var(--player-blue); }
+        .bead-cell.T { background: var(--tie-green); }
+
+        /* ===== EV 顯示 ===== */
+        .ev-section {
+            padding: 10px 16px;
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 8px;
+        }
+
+        .ev-box {
+            text-align: center;
+            padding: 10px 8px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+        }
+
+        .ev-box.banker-ev { background: var(--banker-red-bg); border-color: rgba(255, 71, 87, 0.3); }
+        .ev-box.player-ev { background: var(--player-blue-bg); border-color: rgba(46, 214, 255, 0.3); }
+        .ev-box.tie-ev { background: var(--tie-green-bg); border-color: rgba(46, 204, 113, 0.3); }
+
+        .ev-label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+        }
+
+        .ev-value {
+            font-size: 18px;
+            font-weight: 800;
+            font-family: 'Courier New', monospace;
+        }
+
+        .ev-value.positive { color: var(--positive); }
+        .ev-value.negative { color: var(--negative); }
+        .ev-value.neutral { color: var(--text-secondary); }
+
+        .ev-prob {
+            font-size: 10px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+
+        /* ===== 快速輸入面板 ===== */
+        .table-actions {
+            display: flex;
+            gap: 6px;
+            padding: 10px 16px;
+            border-top: 1px solid var(--border);
+        }
+
+        .record-btn {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .record-btn:active { transform: scale(0.95); }
+
+        .record-btn.banker {
+            background: linear-gradient(135deg, var(--banker-red), #e63950);
+            color: white;
+        }
+
+        .record-btn.player {
+            background: linear-gradient(135deg, var(--player-blue), #1ab8e0);
+            color: white;
+        }
+
+        .record-btn.tie {
+            background: linear-gradient(135deg, var(--tie-green), #27ae60);
+            color: white;
+        }
+
+        .record-btn.reset-btn {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-secondary);
+            border: 1px solid var(--border);
+            flex: 0.5;
+            font-size: 12px;
+        }
+
+        /* ===== 詳細面板 (Modal) ===== */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 200;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(5px);
+        }
+
+        .modal-overlay.show { display: flex; }
+
+        .modal {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            width: 95%;
+            max-width: 600px;
+            max-height: 90vh;
+            overflow-y: auto;
+            animation: modalIn 0.3s ease-out;
+        }
+
+        @keyframes modalIn {
+            from { transform: scale(0.9); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 24px;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 8px;
+        }
+
+        .modal-close:hover { background: var(--bg-card); }
+
+        .modal-body { padding: 20px 24px; }
+
+        .detail-ev-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .detail-ev-card {
+            text-align: center;
+            padding: 16px;
+            border-radius: 14px;
+            border: 1px solid var(--border);
+        }
+
+        .detail-ev-card.banker { background: var(--banker-red-bg); }
+        .detail-ev-card.player { background: var(--player-blue-bg); }
+        .detail-ev-card.tie { background: var(--tie-green-bg); }
+
+        .detail-ev-title {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .detail-ev-value {
+            font-size: 28px;
+            font-weight: 800;
+            font-family: 'Courier New', monospace;
+        }
+
+        .detail-ev-sub {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        .detail-section {
+            margin-bottom: 20px;
+        }
+
+        .detail-section-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .detail-road {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 16px;
+            overflow-x: auto;
+        }
+
+        .trend-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+        }
+
+        /* ===== LINE BOT 設定面板 ===== */
+        .line-panel {
+            display: none;
+            position: fixed;
+            top: 0;
+            right: 0;
+            width: 380px;
+            height: 100%;
+            background: var(--bg-secondary);
+            border-left: 1px solid var(--border);
+            z-index: 150;
+            animation: slideRight 0.3s ease-out;
+            overflow-y: auto;
+        }
+
+        .line-panel.show { display: block; }
+
+        @keyframes slideRight {
+            from { transform: translateX(100%); }
+            to { transform: translateX(0); }
+        }
+
+        .line-panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .line-panel-body { padding: 20px; }
+
+        .line-setting-group {
+            margin-bottom: 20px;
+        }
+
+        .line-setting-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .line-setting-input {
+            width: 100%;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px 14px;
+            color: var(--text-primary);
+            font-size: 13px;
+        }
+
+        .line-log {
+            background: var(--bg-card);
+            border-radius: 8px;
+            padding: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-size: 12px;
+            font-family: monospace;
+        }
+
+        .line-log-entry {
+            padding: 4px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            color: var(--text-secondary);
+        }
+
+        .line-log-entry.alert { color: var(--gold); }
+
+        /* ===== 空狀態 ===== */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-secondary);
+        }
+
+        .empty-state-icon { font-size: 64px; margin-bottom: 16px; }
+        .empty-state-text { font-size: 16px; }
+
+        /* ===== 響應式 ===== */
+        @media (max-width: 768px) {
+            .navbar { padding: 10px 16px; }
+            .stats-bar { padding: 12px 16px; }
+            .tables-grid {
+                grid-template-columns: 1fr;
+                padding: 0 12px 12px;
+            }
+            .controls-bar { padding: 10px 16px; }
+            .line-panel { width: 100%; }
+        }
+
+        /* ===== 滾動條 ===== */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--accent-blue); }
+
+        /* ===== 通知 toast ===== */
+        .toast-container {
+            position: fixed;
+            top: 80px;
+            right: 24px;
+            z-index: 300;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .toast {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 14px 20px;
+            min-width: 280px;
+            animation: toastIn 0.3s ease-out;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+        }
+
+        .toast.alert { border-color: var(--gold); }
+
+        @keyframes toastIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        .toast-title {
+            font-size: 13px;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .toast-body {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        /* ===== 荷官名字 ===== */
+        .dealer-name {
+            font-size: 11px;
+            color: var(--accent-cyan);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        /* ===== 開牌輸入面板 ===== */
+        .card-input-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.75);
+            z-index: 250;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(4px);
+        }
+        .card-input-overlay.show { display: flex; }
+
+        .card-input-panel {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            width: 95%; max-width: 520px;
+            max-height: 92vh;
+            overflow-y: auto;
+            animation: modalIn 0.3s ease-out;
+            padding: 20px;
+        }
+
+        .card-input-header {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 16px;
+        }
+        .card-input-header h3 { font-size: 16px; }
+
+        .card-side-label {
+            font-size: 13px; font-weight: 700;
+            margin: 10px 0 6px;
+            display: flex; align-items: center; gap: 6px;
+        }
+        .card-side-label.player-label { color: var(--player-blue); }
+        .card-side-label.banker-label { color: var(--banker-red); }
+
+        .card-slots {
+            display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;
+        }
+
+        .card-slot {
+            width: 62px; height: 82px;
+            border: 2px dashed var(--border);
+            border-radius: 10px;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            cursor: pointer; transition: all 0.2s;
+            background: var(--bg-card);
+            position: relative;
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+        .card-slot:hover { border-color: var(--accent-blue); }
+        .card-slot.filled {
+            border-style: solid; border-color: var(--accent-cyan);
+            color: var(--text-primary);
+        }
+        .card-slot .card-display {
+            font-size: 20px; font-weight: 800; line-height: 1;
+        }
+        .card-slot .card-suit { font-size: 16px; }
+        .card-slot .card-suit.red { color: #ff4757; }
+        .card-slot .card-suit.black { color: var(--text-primary); }
+        .card-slot .card-remove {
+            position: absolute; top: -6px; right: -6px;
+            width: 18px; height: 18px; border-radius: 50%;
+            background: var(--negative); color: white;
+            font-size: 11px; border: none; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+        }
+
+        .card-picker {
+            display: none;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 12px;
+            margin-top: 8px;
+        }
+        .card-picker.show { display: block; }
+
+        .picker-section-title {
+            font-size: 11px; color: var(--text-secondary);
+            margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px;
+        }
+
+        .picker-ranks, .picker-suits {
+            display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px;
+        }
+
+        .picker-btn {
+            min-width: 36px; height: 36px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-size: 14px; font-weight: 700;
+            cursor: pointer; transition: all 0.15s;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .picker-btn:hover { border-color: var(--accent-blue); background: var(--accent-blue); }
+        .picker-btn.selected { background: var(--accent-blue); border-color: var(--accent-blue); }
+        .picker-btn.suit-btn { font-size: 20px; width: 44px; height: 44px; }
+        .picker-btn.suit-btn.red { color: #ff4757; }
+
+        .dealer-input-group {
+            display: flex; align-items: center; gap: 8px;
+            margin: 12px 0;
+        }
+        .dealer-input-group label {
+            font-size: 12px; color: var(--text-secondary); white-space: nowrap;
+        }
+        .dealer-input-group input {
+            flex: 1; background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: 8px; padding: 8px 12px; color: var(--text-primary); font-size: 13px;
+        }
+
+        .card-input-actions {
+            display: flex; gap: 8px; margin-top: 16px;
+        }
+        .card-input-actions .record-btn { font-size: 15px; padding: 12px; }
+
+        .card-total {
+            font-size: 22px; font-weight: 800;
+            color: var(--gold);
+            margin-left: auto;
+            font-family: 'Courier New', monospace;
+        }
+
+        /* ===== 開牌紀錄表格 ===== */
+        .hand-history-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+        .hand-history-table th {
+            padding: 6px 8px;
+            text-align: left;
+            color: var(--text-secondary);
+            border-bottom: 1px solid var(--border);
+            font-weight: 600;
+            font-size: 11px;
+        }
+        .hand-history-table td {
+            padding: 6px 8px;
+            border-bottom: 1px solid rgba(255,255,255,0.03);
+            vertical-align: middle;
+        }
+        .hand-history-table tr:hover td { background: rgba(255,255,255,0.03); }
+
+        .result-tag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 700;
+            font-size: 11px;
+        }
+        .result-tag.B { background: var(--banker-red-bg); color: var(--banker-red); }
+        .result-tag.P { background: var(--player-blue-bg); color: var(--player-blue); }
+        .result-tag.T { background: var(--tie-green-bg); color: var(--tie-green); }
+
+        .card-display-inline {
+            font-family: 'Courier New', monospace;
+            font-weight: 600;
+            font-size: 12px;
+            letter-spacing: 1px;
+        }
+        .card-display-inline .suit-red { color: #ff4757; }
+        .card-display-inline .suit-black { color: var(--text-primary); }
+
+        .pair-tag {
+            display: inline-block;
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-size: 9px;
+            font-weight: 700;
+            margin-left: 4px;
+        }
+        .pair-tag.pp { background: var(--player-blue-bg); color: var(--player-blue); }
+        .pair-tag.bp { background: var(--banker-red-bg); color: var(--banker-red); }
+        .natural-tag {
+            display: inline-block;
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-size: 9px;
+            font-weight: 700;
+            background: rgba(255,215,0,0.15); color: var(--gold);
+            margin-left: 4px;
+        }
+
+        /* 最近一手牌顯示在桌卡 */
+        .last-hand-display {
+            padding: 6px 16px;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(255,255,255,0.02);
+            border-top: 1px solid var(--border);
+        }
+        .last-hand-side {
+            display: flex; align-items: center; gap: 4px;
+        }
+        .last-hand-side .side-label {
+            font-size: 10px; font-weight: 700;
+        }
+        .last-hand-side .side-label.player { color: var(--player-blue); }
+        .last-hand-side .side-label.banker { color: var(--banker-red); }
+        .last-hand-total {
+            font-weight: 800; font-size: 14px;
+            color: var(--gold);
+            margin-left: 2px;
+        }
+    </style>
+</head>
+<body>
+
+<!-- 頂部導航 -->
+<nav class="navbar">
+    <div class="navbar-brand">
+        <span class="navbar-logo">🎰</span>
+        <div>
+            <div class="navbar-title">百家之眼</div>
+            <div class="navbar-subtitle">BACCARAT MONITOR</div>
+        </div>
+    </div>
+    <div class="navbar-status">
+        <div class="status-badge status-offline" id="wsStatus">
+            <span class="status-dot"></span>
+            <span id="wsStatusText">連線中...</span>
+        </div>
+        <button class="btn btn-success" onclick="toggleLinePanel()">
+            🤖 LINE BOT
+        </button>
+    </div>
+</nav>
+
+<!-- 統計欄 -->
+<div class="stats-bar">
+    <div class="stat-card">
+        <div class="stat-icon tables">🎯</div>
+        <div class="stat-info">
+            <div class="stat-label">監控桌數</div>
+            <div class="stat-value" id="totalTables">0</div>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon hands">🃏</div>
+        <div class="stat-info">
+            <div class="stat-label">總局數</div>
+            <div class="stat-value" id="totalHands">0</div>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon alerts">⚡</div>
+        <div class="stat-info">
+            <div class="stat-label">EV 警報</div>
+            <div class="stat-value" id="totalAlerts">0</div>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon line">💬</div>
+        <div class="stat-info">
+            <div class="stat-label">LINE 推送</div>
+            <div class="stat-value" id="totalPushes">0</div>
+        </div>
+    </div>
+</div>
+
+<!-- 控制列 -->
+<div class="controls-bar">
+    <div class="controls-left">
+        <div class="view-toggle">
+            <button class="view-btn active" onclick="setView('grid')">📊 網格</button>
+            <button class="view-btn" onclick="setView('list')">📋 列表</button>
+        </div>
+        <select class="filter-select" id="filterSelect" onchange="filterTables()">
+            <option value="all">全部桌台</option>
+            <option value="active">進行中</option>
+            <option value="alert">有警報</option>
+            <option value="idle">等待中</option>
+        </select>
+    </div>
+    <div class="controls-right">
+        <button class="btn btn-primary" onclick="addTable()">➕ 新增桌台</button>
+    </div>
+</div>
+
+<!-- 桌台網格 -->
+<div class="tables-grid" id="tablesGrid">
+    <!-- 由 JS 動態生成 -->
+</div>
+
+<!-- 詳細面板 Modal -->
+<div class="modal-overlay" id="detailModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h2 id="modalTitle">桌台詳情</h2>
+            <button class="modal-close" onclick="closeModal()">&times;</button>
+        </div>
+        <div class="modal-body" id="modalBody">
+            <!-- 動態生成 -->
+        </div>
+    </div>
+</div>
+
+<!-- LINE BOT 面板 -->
+<div class="line-panel" id="linePanel">
+    <div class="line-panel-header">
+        <h3>🤖 LINE BOT 設定</h3>
+        <button class="modal-close" onclick="toggleLinePanel()">&times;</button>
+    </div>
+    <div class="line-panel-body">
+        <div class="line-setting-group">
+            <div class="line-setting-label">連線狀態</div>
+            <div class="status-badge status-offline" id="lineStatus" style="display:inline-flex">
+                <span class="status-dot"></span>
+                <span id="lineStatusText">未設定</span>
+            </div>
+        </div>
+        <div class="line-setting-group">
+            <div class="line-setting-label">Webhook URL</div>
+            <input class="line-setting-input" id="webhookUrl" readonly
+                   value="" placeholder="啟動伺服器後自動生成">
+        </div>
+        <div class="line-setting-group">
+            <div class="line-setting-label">EV 警報閾值</div>
+            <input class="line-setting-input" type="number" id="evThreshold"
+                   value="0.01" step="0.001" min="0.001" max="0.1">
+        </div>
+        <div class="line-setting-group">
+            <div class="line-setting-label">LINE BOT 指令說明</div>
+            <div style="background:var(--bg-card);border-radius:8px;padding:14px;font-size:12px;line-height:1.8;color:var(--text-secondary);">
+                <strong style="color:var(--text-primary);">在 LINE 中輸入以下指令：</strong><br>
+                📊 <code style="color:var(--accent-cyan);">全廳</code> - 查看全廳狀態<br>
+                🔍 <code style="color:var(--accent-cyan);">桌N</code> - 查看第N桌 (如: 桌3)<br>
+                🔔 <code style="color:var(--accent-cyan);">訂閱</code> - 開啟 EV 警報通知<br>
+                🔕 <code style="color:var(--accent-cyan);">取消訂閱</code> - 關閉通知<br>
+                ❓ <code style="color:var(--accent-cyan);">指令</code> - 顯示幫助
+            </div>
+        </div>
+        <div class="line-setting-group">
+            <div class="line-setting-label">推送紀錄</div>
+            <div class="line-log" id="lineLog">
+                <div class="line-log-entry">系統啟動中...</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 開牌輸入面板 -->
+<div class="card-input-overlay" id="cardInputOverlay">
+    <div class="card-input-panel">
+        <div class="card-input-header">
+            <h3 id="cardInputTitle">🃏 開牌記錄</h3>
+            <button class="modal-close" onclick="closeCardInput()">&times;</button>
+        </div>
+
+        <div class="dealer-input-group">
+            <label>🧑‍💼 荷官</label>
+            <input type="text" id="dealerNameInput" placeholder="輸入荷官名字 (可選)">
+        </div>
+
+        <!-- 閒家 -->
+        <div class="card-side-label player-label">
+            🔵 閒家
+            <span class="card-total" id="playerTotalDisplay">0</span>
+        </div>
+        <div class="card-slots" id="playerSlots">
+            <div class="card-slot" onclick="openPicker('player',0)"><span>第1張</span></div>
+            <div class="card-slot" onclick="openPicker('player',1)"><span>第2張</span></div>
+            <div class="card-slot" onclick="openPicker('player',2)"><span>第3張</span></div>
+        </div>
+
+        <!-- 莊家 -->
+        <div class="card-side-label banker-label">
+            🔴 莊家
+            <span class="card-total" id="bankerTotalDisplay">0</span>
+        </div>
+        <div class="card-slots" id="bankerSlots">
+            <div class="card-slot" onclick="openPicker('banker',0)"><span>第1張</span></div>
+            <div class="card-slot" onclick="openPicker('banker',1)"><span>第2張</span></div>
+            <div class="card-slot" onclick="openPicker('banker',2)"><span>第3張</span></div>
+        </div>
+
+        <!-- 選牌器 -->
+        <div class="card-picker" id="cardPicker">
+            <div class="picker-section-title">選擇花色</div>
+            <div class="picker-suits">
+                <button class="picker-btn suit-btn black" onclick="pickSuit('s')">♠</button>
+                <button class="picker-btn suit-btn red" onclick="pickSuit('h')">♥</button>
+                <button class="picker-btn suit-btn red" onclick="pickSuit('d')">♦</button>
+                <button class="picker-btn suit-btn black" onclick="pickSuit('c')">♣</button>
+            </div>
+            <div class="picker-section-title">選擇點數</div>
+            <div class="picker-ranks">
+                <button class="picker-btn" onclick="pickRank(1)">A</button>
+                <button class="picker-btn" onclick="pickRank(2)">2</button>
+                <button class="picker-btn" onclick="pickRank(3)">3</button>
+                <button class="picker-btn" onclick="pickRank(4)">4</button>
+                <button class="picker-btn" onclick="pickRank(5)">5</button>
+                <button class="picker-btn" onclick="pickRank(6)">6</button>
+                <button class="picker-btn" onclick="pickRank(7)">7</button>
+                <button class="picker-btn" onclick="pickRank(8)">8</button>
+                <button class="picker-btn" onclick="pickRank(9)">9</button>
+                <button class="picker-btn" onclick="pickRank(10)">10</button>
+                <button class="picker-btn" onclick="pickRank(11)">J</button>
+                <button class="picker-btn" onclick="pickRank(12)">Q</button>
+                <button class="picker-btn" onclick="pickRank(13)">K</button>
+            </div>
+        </div>
+
+        <!-- 送出按鈕 -->
+        <div class="card-input-actions">
+            <button class="record-btn banker" style="flex:1" onclick="submitCardRecord('B')">莊贏</button>
+            <button class="record-btn tie" style="flex:0.6" onclick="submitCardRecord('T')">和</button>
+            <button class="record-btn player" style="flex:1" onclick="submitCardRecord('P')">閒贏</button>
+        </div>
+        <div style="text-align:center;margin-top:8px">
+            <button class="btn" style="background:rgba(255,255,255,0.05);color:var(--text-secondary);border:1px solid var(--border);font-size:12px" onclick="submitQuickRecord()">⚡ 快速記錄 (不填牌)</button>
+        </div>
+    </div>
+</div>
+
+<!-- Toast 通知 -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+// ===== 全域狀態 =====
+let tablesData = {};
+let ws = null;
+let alertCount = 0;
+let pushCount = 0;
+let currentView = 'grid';
+const EV_THRESHOLD = 0.008;
+
+// 牌面常數
+const RANK_NAMES = {1:'A',2:'2',3:'3',4:'4',5:'5',6:'6',7:'7',8:'8',9:'9',10:'10',11:'J',12:'Q',13:'K'};
+const SUIT_SYMBOLS = {s:'♠',h:'♥',d:'♦',c:'♣'};
+const SUIT_COLORS = {s:'black',h:'red',d:'red',c:'black'};
+
+// ===== 開牌輸入狀態 =====
+let cardInputTableId = null;
+let pickerTarget = {side: null, index: null};
+let pickerSelectedSuit = null;
+let inputCards = { player: [null,null,null], banker: [null,null,null] };
+
+// ===== WebSocket 連線 =====
+function connectWS() {
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(`${protocol}//${location.host}`);
+
+    ws.onopen = () => {
+        document.getElementById('wsStatus').className = 'status-badge status-online';
+        document.getElementById('wsStatusText').textContent = '即時連線';
+        addLineLog('WebSocket 已連線');
+    };
+
+    ws.onclose = () => {
+        document.getElementById('wsStatus').className = 'status-badge status-offline';
+        document.getElementById('wsStatusText').textContent = '已斷線';
+        addLineLog('WebSocket 斷線，3秒後重連...');
+        setTimeout(connectWS, 3000);
+    };
+
+    ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+
+        if (data.type === 'init') {
+            data.tables.forEach(t => {
+                tablesData[t.tableId] = t;
+            });
+            renderAllTables();
+        } else if (data.type === 'update') {
+            tablesData[data.tableId] = data.state;
+            renderTable(data.tableId);
+            checkEVAlert(data.state);
+            updateStats();
+        } else if (data.type === 'reset') {
+            tablesData[data.tableId] = data.state;
+            renderTable(data.tableId);
+            updateStats();
+        } else if (data.type === 'newTable') {
+            tablesData[data.tableId] = data.state;
+            renderAllTables();
+        }
+    };
+}
+
+// ===== 渲染 =====
+function renderAllTables() {
+    const grid = document.getElementById('tablesGrid');
+    grid.innerHTML = '';
+
+    const filter = document.getElementById('filterSelect').value;
+
+    for (const [id, table] of Object.entries(tablesData)) {
+        if (filter === 'active' && table.handCount === 0) continue;
+        if (filter === 'idle' && table.handCount > 0) continue;
+        if (filter === 'alert' && !hasAlert(table)) continue;
+
+        grid.appendChild(createTableCard(table));
+    }
+
+    updateStats();
+}
+
+function renderTable(tableId) {
+    const existing = document.getElementById(`table-${tableId}`);
+    if (existing) {
+        const table = tablesData[tableId];
+        const newCard = createTableCard(table);
+        existing.replaceWith(newCard);
+    }
+}
+
+function createTableCard(table) {
+    const div = document.createElement('div');
+    div.className = `table-card${hasAlert(table) ? ' alert' : ''}`;
+    div.id = `table-${table.tableId}`;
+
+    const ev = table.ev;
+    const recent = table.history.slice(-30);
+
+    // 建立大路
+    let roadHTML = buildBigRoadHTML(table.bigRoad);
+
+    // 建立珠盤路 (最近30局)
+    const beadHTML = recent.map(r =>
+        `<div class="bead-cell ${r}">${r === 'B' ? '莊' : r === 'P' ? '閒' : '和'}</div>`
+    ).join('');
+
+    // 最近一手牌型顯示
+    let lastHandHTML = '';
+    if (table.handDetails && table.handDetails.length > 0) {
+        const last = table.handDetails[table.handDetails.length - 1];
+        if (last.playerCards.length > 0) {
+            const pCards = last.playerCards.map(c => formatCardInline(c)).join(' ');
+            const bCards = last.bankerCards.map(c => formatCardInline(c)).join(' ');
+            let tags = '';
+            if (last.playerPair) tags += '<span class="pair-tag pp">閒對</span>';
+            if (last.bankerPair) tags += '<span class="pair-tag bp">莊對</span>';
+            if (last.natural) tags += '<span class="natural-tag">天牌</span>';
+            lastHandHTML = `
+                <div class="last-hand-display">
+                    <div class="last-hand-side">
+                        <span class="side-label player">閒</span>
+                        <span class="card-display-inline">${pCards}</span>
+                        <span class="last-hand-total">${last.playerTotal}</span>
+                    </div>
+                    <span style="color:var(--text-secondary)">vs</span>
+                    <div class="last-hand-side">
+                        <span class="side-label banker">莊</span>
+                        <span class="card-display-inline">${bCards}</span>
+                        <span class="last-hand-total">${last.bankerTotal}</span>
+                    </div>
+                    ${tags}
+                </div>`;
+        }
+    }
+
+    const dealerHTML = table.dealer
+        ? `<div class="dealer-name">🧑‍💼 ${table.dealer}</div>` : '';
+
+    div.innerHTML = `
+        <div class="table-header">
+            <div class="table-name">
+                🎯 ${table.tableName}
+                ${hasAlert(table) ? '<span style="color:var(--gold)">⚡</span>' : ''}
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+                ${dealerHTML}
+                <div class="table-hand-count">第 ${table.handCount} 局</div>
+            </div>
+        </div>
+        <div class="table-stats">
+            <div class="table-stat"><span class="stat-dot banker"></span>莊 ${table.stats.banker}</div>
+            <div class="table-stat"><span class="stat-dot player"></span>閒 ${table.stats.player}</div>
+            <div class="table-stat"><span class="stat-dot tie"></span>和 ${table.stats.tie}</div>
+            <div class="table-stat" style="color:var(--player-blue);font-size:10px">閒對${table.stats.playerPair}</div>
+            <div class="table-stat" style="color:var(--banker-red);font-size:10px">莊對${table.stats.bankerPair}</div>
+            <div class="table-stat" style="margin-left:auto;color:var(--text-secondary)">🃏 ${table.totalCards}</div>
+        </div>
+        ${lastHandHTML}
+        <div class="bead-road">${beadHTML || '<span style="color:var(--text-secondary);font-size:12px">等待開局...</span>'}</div>
+        <div class="road-container">
+            <div class="road-grid">${roadHTML}</div>
+        </div>
+        <div class="ev-section">
+            <div class="ev-box banker-ev">
+                <div class="ev-label">莊 EV</div>
+                <div class="ev-value ${getEVClass(ev.banker)}">${formatEV(ev.banker)}</div>
+                <div class="ev-prob">${ev.bankerProb || 45.86}%</div>
+            </div>
+            <div class="ev-box player-ev">
+                <div class="ev-label">閒 EV</div>
+                <div class="ev-value ${getEVClass(ev.player)}">${formatEV(ev.player)}</div>
+                <div class="ev-prob">${ev.playerProb || 44.62}%</div>
+            </div>
+            <div class="ev-box tie-ev">
+                <div class="ev-label">和 EV</div>
+                <div class="ev-value ${getEVClass(ev.tie)}">${formatEV(ev.tie)}</div>
+                <div class="ev-prob">${ev.tieProb || 9.52}%</div>
+            </div>
+        </div>
+        <div class="table-actions">
+            <button class="record-btn banker" onclick="openCardInput(${table.tableId})">🃏 開牌記錄</button>
+            <button class="record-btn reset-btn" onclick="resetTable(${table.tableId})">🔄</button>
+        </div>
+    `;
+
+    div.addEventListener('click', (e) => {
+        if (!e.target.closest('.record-btn') && !e.target.closest('.reset-btn')) {
+            openDetail(table.tableId);
+        }
+    });
+
+    return div;
+}
+
+// 建立大路 HTML
+function buildBigRoadHTML(bigRoad) {
+    if (!bigRoad || bigRoad.length === 0) return '';
+
+    const columns = {};
+    bigRoad.forEach(cell => {
+        if (!columns[cell.col]) columns[cell.col] = [];
+        columns[cell.col].push(cell);
+    });
+
+    let html = '';
+    // 只顯示最近的列
+    const colKeys = Object.keys(columns).sort((a, b) => a - b).slice(-20);
+
+    for (const col of colKeys) {
+        const cells = columns[col];
+        let colHTML = '';
+        for (const cell of cells) {
+            colHTML += `<div class="road-cell ${cell.result}">${cell.result === 'B' ? '莊' : '閒'}</div>`;
+        }
+        html += `<div class="road-column">${colHTML}</div>`;
+    }
+
+    return html;
+}
+
+function hasAlert(table) {
+    if (!table.ev || table.handCount === 0) return false;
+    return Math.abs(table.ev.banker) > EV_THRESHOLD ||
+           Math.abs(table.ev.player) > EV_THRESHOLD;
+}
+
+function getEVClass(val) {
+    if (!val || val === 0) return 'neutral';
+    return val > 0 ? 'positive' : 'negative';
+}
+
+function formatEV(val) {
+    if (!val || val === 0) return '0.0000';
+    const sign = val > 0 ? '+' : '';
+    return sign + val.toFixed(4);
+}
+
+// ===== EV 警報 =====
+function checkEVAlert(table) {
+    if (!table.ev || table.handCount < 3) return;
+
+    const ev = table.ev;
+    let alertSide = null;
+    let alertVal = 0;
+
+    if (Math.abs(ev.banker) > EV_THRESHOLD) {
+        alertSide = '莊';
+        alertVal = ev.banker;
+    }
+    if (Math.abs(ev.player) > EV_THRESHOLD) {
+        if (!alertSide || Math.abs(ev.player) > Math.abs(alertVal)) {
+            alertSide = '閒';
+            alertVal = ev.player;
+        }
+    }
+
+    if (alertSide) {
+        alertCount++;
+        const emoji = alertVal > 0 ? '🟢' : '🔴';
+        showToast(
+            `${emoji} ${table.tableName} - 仙人指路`,
+            `第${table.handCount}局 ${alertSide} EV=${formatEV(alertVal)}`,
+            true
+        );
+        addLineLog(`⚡ ${table.tableName} 第${table.handCount}局 ${alertSide} EV=${formatEV(alertVal)}`, true);
+        pushCount++;
+        updateStats();
+    }
+}
+
+// ===== 卡牌格式化 =====
+function formatCardInline(card) {
+    if (!card) return '';
+    const rank = RANK_NAMES[card.rank] || card.rank;
+    const suit = SUIT_SYMBOLS[card.suit] || '';
+    const color = SUIT_COLORS[card.suit] || 'black';
+    return `<span class="suit-${color}">${suit}${rank}</span>`;
+}
+
+function cardBacValue(rank) {
+    return rank >= 10 ? 0 : rank;
+}
+
+function calcHandTotal(cards) {
+    if (!cards) return 0;
+    let sum = 0;
+    for (const c of cards) { if (c) sum += cardBacValue(c.rank); }
+    return sum % 10;
+}
+
+// ===== 開牌輸入面板 =====
+function openCardInput(tableId) {
+    cardInputTableId = tableId;
+    inputCards = { player: [null,null,null], banker: [null,null,null] };
+    pickerTarget = {side:null, index:null};
+    pickerSelectedSuit = null;
+
+    const table = tablesData[tableId];
+    document.getElementById('cardInputTitle').textContent = `🃏 ${table.tableName} - 開牌記錄`;
+    document.getElementById('dealerNameInput').value = table.dealer || '';
+    document.getElementById('cardPicker').classList.remove('show');
+    updateCardSlots();
+    document.getElementById('cardInputOverlay').classList.add('show');
+}
+
+function closeCardInput() {
+    document.getElementById('cardInputOverlay').classList.remove('show');
+    cardInputTableId = null;
+}
+
+document.getElementById('cardInputOverlay').addEventListener('click', (e) => {
+    if (e.target === document.getElementById('cardInputOverlay')) closeCardInput();
+});
+
+function openPicker(side, index) {
+    pickerTarget = {side, index};
+    pickerSelectedSuit = null;
+    document.getElementById('cardPicker').classList.add('show');
+    // 清除 suit 選中狀態
+    document.querySelectorAll('.picker-suits .picker-btn').forEach(b => b.classList.remove('selected'));
+}
+
+function pickSuit(suit) {
+    pickerSelectedSuit = suit;
+    document.querySelectorAll('.picker-suits .picker-btn').forEach(b => b.classList.remove('selected'));
+    event.target.classList.add('selected');
+}
+
+function pickRank(rank) {
+    if (!pickerSelectedSuit) {
+        showToast('⚠️ 提示', '請先選擇花色');
+        return;
+    }
+    inputCards[pickerTarget.side][pickerTarget.index] = { rank, suit: pickerSelectedSuit };
+    document.getElementById('cardPicker').classList.remove('show');
+    pickerSelectedSuit = null;
+    updateCardSlots();
+}
+
+function removeCard(side, index) {
+    event.stopPropagation();
+    inputCards[side][index] = null;
+    updateCardSlots();
+}
+
+function updateCardSlots() {
+    ['player','banker'].forEach(side => {
+        const slotsEl = document.getElementById(side + 'Slots');
+        const slots = slotsEl.querySelectorAll('.card-slot');
+        for (let i = 0; i < 3; i++) {
+            const card = inputCards[side][i];
+            if (card) {
+                const rank = RANK_NAMES[card.rank] || card.rank;
+                const suit = SUIT_SYMBOLS[card.suit] || '';
+                const color = SUIT_COLORS[card.suit] || 'black';
+                slots[i].className = 'card-slot filled';
+                slots[i].innerHTML = `
+                    <span class="card-suit ${color}">${suit}</span>
+                    <span class="card-display">${rank}</span>
+                    <button class="card-remove" onclick="removeCard('${side}',${i})">✕</button>`;
+            } else {
+                slots[i].className = 'card-slot';
+                slots[i].innerHTML = `<span>第${i+1}張</span>`;
+            }
+        }
+        // 更新點數
+        const cards = inputCards[side].filter(c => c);
+        const total = calcHandTotal(cards);
+        document.getElementById(side + 'TotalDisplay').textContent = cards.length > 0 ? total : '0';
+    });
+}
+
+async function submitCardRecord(result) {
+    if (!cardInputTableId) return;
+
+    const playerCards = inputCards.player.filter(c => c);
+    const bankerCards = inputCards.banker.filter(c => c);
+    const dealerName = document.getElementById('dealerNameInput').value.trim();
+
+    // 如果有填荷官名字，先更新
+    if (dealerName) {
+        const table = tablesData[cardInputTableId];
+        if (table.dealer !== dealerName) {
+            await fetch(`/api/tables/${cardInputTableId}/dealer`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ dealer: dealerName })
+            });
+        }
+    }
+
+    try {
+        const body = { result };
+        if (playerCards.length > 0) body.playerCards = playerCards;
+        if (bankerCards.length > 0) body.bankerCards = bankerCards;
+
+        const res = await fetch(`/api/tables/${cardInputTableId}/record`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        if (!res.ok) throw new Error('API error');
+        closeCardInput();
+    } catch (err) {
+        showToast('❌ 錯誤', '記錄失敗: ' + err.message);
+    }
+}
+
+async function submitQuickRecord() {
+    if (!cardInputTableId) return;
+    const dealerName = document.getElementById('dealerNameInput').value.trim();
+    if (dealerName) {
+        const table = tablesData[cardInputTableId];
+        if (table.dealer !== dealerName) {
+            await fetch(`/api/tables/${cardInputTableId}/dealer`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ dealer: dealerName })
+            });
+        }
+    }
+    // 不填牌 - 讓用戶選結果
+    showToast('💡 提示', '請點擊上方 莊贏/和/閒贏 按鈕選擇結果');
+}
+
+// ===== API 操作 =====
+async function recordResult(tableId, result) {
+    try {
+        const res = await fetch(`/api/tables/${tableId}/record`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ result })
+        });
+        if (!res.ok) throw new Error('API error');
+    } catch (err) {
+        showToast('❌ 錯誤', '記錄失敗: ' + err.message);
+    }
+}
+
+async function resetTable(tableId) {
+    if (!confirm('確定要重置此桌的牌靴嗎？')) return;
+    try {
+        await fetch(`/api/tables/${tableId}/reset`, { method: 'POST' });
+        addLineLog(`🔄 桌台 ${tableId} 已重置牌靴`);
+    } catch (err) {
+        showToast('❌ 錯誤', '重置失敗');
+    }
+}
+
+async function addTable() {
+    const name = prompt('輸入桌台名稱:');
+    if (!name) return;
+    try {
+        await fetch('/api/tables', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name })
+        });
+        addLineLog(`➕ 新增桌台: ${name}`);
+    } catch (err) {
+        showToast('❌ 錯誤', '新增失敗');
+    }
+}
+
+// ===== 詳細面板 =====
+function openDetail(tableId) {
+    const table = tablesData[tableId];
+    if (!table) return;
+
+    const ev = table.ev;
+    const modal = document.getElementById('detailModal');
+    const dealerText = table.dealer ? ` | 🧑‍💼 ${table.dealer}` : '';
+    document.getElementById('modalTitle').textContent = `🎯 ${table.tableName} - 詳細分析`;
+
+    const beadHTML = table.history.map(r =>
+        `<div class="bead-cell ${r}" style="width:18px;height:18px;font-size:8px">${r === 'B' ? '莊' : r === 'P' ? '閒' : '和'}</div>`
+    ).join('');
+
+    const bigRoadHTML = buildBigRoadHTML(table.bigRoad);
+
+    // 建立開牌紀錄表格
+    let handHistoryHTML = '';
+    if (table.handDetails && table.handDetails.length > 0) {
+        const rows = table.handDetails.slice().reverse().map(d => {
+            const resLabel = d.result === 'B' ? '莊' : d.result === 'P' ? '閒' : '和';
+            const pCards = d.playerCards.length > 0
+                ? d.playerCards.map(c => formatCardInline(c)).join(' ') : '-';
+            const bCards = d.bankerCards.length > 0
+                ? d.bankerCards.map(c => formatCardInline(c)).join(' ') : '-';
+            let tags = '';
+            if (d.playerPair) tags += '<span class="pair-tag pp">閒對</span>';
+            if (d.bankerPair) tags += '<span class="pair-tag bp">莊對</span>';
+            if (d.natural) tags += '<span class="natural-tag">天牌</span>';
+            const dealerCol = d.dealer ? d.dealer : '-';
+            return `<tr>
+                <td>#${d.hand}</td>
+                <td><span class="result-tag ${d.result}">${resLabel}</span></td>
+                <td><span class="card-display-inline">${pCards}</span> <strong style="color:var(--gold)">${d.playerTotal}</strong></td>
+                <td><span class="card-display-inline">${bCards}</span> <strong style="color:var(--gold)">${d.bankerTotal}</strong></td>
+                <td>${tags}</td>
+                <td style="color:var(--accent-cyan)">${dealerCol}</td>
+            </tr>`;
+        }).join('');
+
+        handHistoryHTML = `
+            <div class="detail-section">
+                <div class="detail-section-title">🃏 開牌紀錄 (共 ${table.handDetails.length} 局)</div>
+                <div class="detail-road" style="max-height:300px;overflow-y:auto">
+                    <table class="hand-history-table">
+                        <thead><tr>
+                            <th>局</th><th>結果</th><th>閒家</th><th>莊家</th><th>標記</th><th>荷官</th>
+                        </tr></thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+            </div>`;
+    }
+
+    document.getElementById('modalBody').innerHTML = `
+        <div class="detail-ev-grid">
+            <div class="detail-ev-card banker">
+                <div class="detail-ev-title" style="color:var(--banker-red)">🔴 莊</div>
+                <div class="detail-ev-value ${getEVClass(ev.banker)}">${formatEV(ev.banker)}</div>
+                <div class="detail-ev-sub">勝率 ${ev.bankerProb || 45.86}%</div>
+                <div class="detail-ev-sub">勝 ${table.stats.banker} 局 | 莊對 ${table.stats.bankerPair}</div>
+            </div>
+            <div class="detail-ev-card player">
+                <div class="detail-ev-title" style="color:var(--player-blue)">🔵 閒</div>
+                <div class="detail-ev-value ${getEVClass(ev.player)}">${formatEV(ev.player)}</div>
+                <div class="detail-ev-sub">勝率 ${ev.playerProb || 44.62}%</div>
+                <div class="detail-ev-sub">勝 ${table.stats.player} 局 | 閒對 ${table.stats.playerPair}</div>
+            </div>
+            <div class="detail-ev-card tie">
+                <div class="detail-ev-title" style="color:var(--tie-green)">🟢 和</div>
+                <div class="detail-ev-value ${getEVClass(ev.tie)}">${formatEV(ev.tie)}</div>
+                <div class="detail-ev-sub">機率 ${ev.tieProb || 9.52}%</div>
+                <div class="detail-ev-sub">${table.stats.tie} 局</div>
+            </div>
+        </div>
+
+        <div class="detail-section">
+            <div class="detail-section-title">📊 剩餘牌數: ${table.totalCards} | 已進行 ${table.handCount} 局${dealerText}</div>
+        </div>
+
+        ${handHistoryHTML}
+
+        <div class="detail-section">
+            <div class="detail-section-title">🔮 珠盤路 (全部紀錄)</div>
+            <div class="detail-road">
+                <div style="display:flex;flex-wrap:wrap;gap:3px">${beadHTML || '無紀錄'}</div>
+            </div>
+        </div>
+
+        <div class="detail-section">
+            <div class="detail-section-title">🛤️ 大路</div>
+            <div class="detail-road">
+                <div class="road-grid">${bigRoadHTML || '無紀錄'}</div>
+            </div>
+        </div>
+
+        <div class="detail-section">
+            <div class="detail-section-title">📈 趨勢分析</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+                ${buildTrendBadges(table)}
+            </div>
+        </div>
+
+        <div style="display:flex;gap:8px;margin-top:20px">
+            <button class="record-btn banker" style="flex:1" onclick="closeModal();openCardInput(${table.tableId})">🃏 開牌記錄</button>
+        </div>
+    `;
+
+    modal.classList.add('show');
+}
+
+function buildTrendBadges(table) {
+    if (table.handCount < 3) return '<span style="color:var(--text-secondary)">資料不足</span>';
+
+    const history = table.history;
+    const badges = [];
+
+    // 連莊/連閒
+    let streak = 1;
+    const last = history[history.length - 1];
+    for (let i = history.length - 2; i >= 0; i--) {
+        if (history[i] === last) streak++;
+        else break;
+    }
+    if (streak >= 2) {
+        const label = last === 'B' ? '莊' : last === 'P' ? '閒' : '和';
+        const color = last === 'B' ? 'var(--banker-red)' : last === 'P' ? 'var(--player-blue)' : 'var(--tie-green)';
+        badges.push(`<span class="trend-badge" style="border-color:${color}">🔥 連${label} ${streak}</span>`);
+    }
+
+    // 莊閒比
+    const bCount = history.filter(r => r === 'B').length;
+    const pCount = history.filter(r => r === 'P').length;
+    if (bCount > pCount * 1.3) {
+        badges.push(`<span class="trend-badge" style="border-color:var(--banker-red)">📊 莊強勢 (${bCount}:${pCount})</span>`);
+    } else if (pCount > bCount * 1.3) {
+        badges.push(`<span class="trend-badge" style="border-color:var(--player-blue)">📊 閒強勢 (${pCount}:${bCount})</span>`);
+    } else {
+        badges.push(`<span class="trend-badge">📊 均勢 (${bCount}:${pCount})</span>`);
+    }
+
+    // 單跳檢測
+    const r4 = history.slice(-4).filter(r => r !== 'T');
+    if (r4.length >= 4) {
+        let isZigzag = true;
+        for (let i = 1; i < r4.length; i++) {
+            if (r4[i] === r4[i-1]) { isZigzag = false; break; }
+        }
+        if (isZigzag) badges.push(`<span class="trend-badge" style="border-color:var(--accent-cyan)">🔄 單跳模式</span>`);
+    }
+
+    return badges.join('');
+}
+
+function closeModal() {
+    document.getElementById('detailModal').classList.remove('show');
+}
+
+// 點擊 Modal 外側關閉
+document.getElementById('detailModal').addEventListener('click', (e) => {
+    if (e.target === document.getElementById('detailModal')) closeModal();
+});
+
+// ===== UI 功能 =====
+function setView(view) {
+    currentView = view;
+    document.querySelectorAll('.view-btn').forEach(btn => btn.classList.remove('active'));
+    event.target.classList.add('active');
+    renderAllTables();
+}
+
+function filterTables() {
+    renderAllTables();
+}
+
+function toggleLinePanel() {
+    document.getElementById('linePanel').classList.toggle('show');
+    const webhookInput = document.getElementById('webhookUrl');
+    webhookInput.value = `${location.origin}/webhook`;
+}
+
+function updateStats() {
+    const tableCount = Object.keys(tablesData).length;
+    let totalHands = 0;
+    for (const t of Object.values(tablesData)) {
+        totalHands += t.handCount;
+    }
+
+    document.getElementById('totalTables').textContent = tableCount;
+    document.getElementById('totalHands').textContent = totalHands;
+    document.getElementById('totalAlerts').textContent = alertCount;
+    document.getElementById('totalPushes').textContent = pushCount;
+}
+
+function showToast(title, body, isAlert = false) {
+    const container = document.getElementById('toastContainer');
+    const toast = document.createElement('div');
+    toast.className = `toast${isAlert ? ' alert' : ''}`;
+    toast.innerHTML = `
+        <div class="toast-title">${title}</div>
+        <div class="toast-body">${body}</div>
+    `;
+    container.appendChild(toast);
+
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateX(100%)';
+        toast.style.transition = 'all 0.3s';
+        setTimeout(() => toast.remove(), 300);
+    }, 4000);
+}
+
+function addLineLog(text, isAlert = false) {
+    const log = document.getElementById('lineLog');
+    const entry = document.createElement('div');
+    entry.className = `line-log-entry${isAlert ? ' alert' : ''}`;
+    const now = new Date().toLocaleTimeString('zh-TW');
+    entry.textContent = `[${now}] ${text}`;
+    log.insertBefore(entry, log.firstChild);
+
+    // 最多保留100條
+    while (log.children.length > 100) {
+        log.removeChild(log.lastChild);
+    }
+}
+
+// ===== 啟動 =====
+connectWS();
+</script>
+
+</body>
+</html>

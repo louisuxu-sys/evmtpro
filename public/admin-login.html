@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>百家之眼 - 管理員登入</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #1a1a2e; color: #eee; font-family: 'Segoe UI', sans-serif; }
+  .header { background: #16213e; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; }
+  .header h1 { font-size: 18px; color: #00ff88; }
+  .status { font-size: 14px; padding: 4px 12px; border-radius: 12px; }
+  .status.off { background: #ff4444; }
+  .status.on { background: #00cc66; }
+  .status.login { background: #ffaa00; color: #000; }
+  .toolbar { background: #0f3460; padding: 8px 20px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .toolbar input { background: #1a1a2e; border: 1px solid #444; color: #eee; padding: 6px 10px; border-radius: 4px; font-size: 13px; }
+  .toolbar input.url { flex: 1; min-width: 200px; }
+  .toolbar button { background: #e94560; border: none; color: #fff; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  .toolbar button:hover { opacity: 0.85; }
+  .toolbar button.nav { background: #0f3460; border: 1px solid #00ff88; color: #00ff88; }
+  .screen-wrap { position: relative; width: 100%; max-width: 1280px; margin: 10px auto; cursor: crosshair; }
+  .screen-wrap img { width: 100%; display: block; border: 2px solid #333; border-radius: 4px; }
+  .screen-wrap .no-img { width: 100%; height: 400px; display: flex; align-items: center; justify-content: center; background: #111; border: 2px solid #333; border-radius: 4px; color: #666; font-size: 20px; }
+  .info-bar { background: #16213e; padding: 8px 20px; font-size: 13px; color: #aaa; display: flex; gap: 20px; flex-wrap: wrap; }
+  .keyboard-bar { background: #0f3460; padding: 8px 20px; display: flex; gap: 8px; align-items: center; }
+  .keyboard-bar input { flex: 1; background: #1a1a2e; border: 1px solid #444; color: #eee; padding: 8px 12px; border-radius: 4px; font-size: 14px; }
+  .keyboard-bar button { background: #e94560; border: none; color: #fff; padding: 8px 16px; border-radius: 4px; cursor: pointer; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>🎰 百家之眼 - 遠端登入</h1>
+  <span class="status off" id="statusBadge">未連線</span>
+</div>
+
+<div class="toolbar">
+  <input class="url" id="urlInput" placeholder="輸入網址，如娛樂城登入頁..." value="">
+  <button class="nav" onclick="doNavigate()">前往</button>
+  <button onclick="doStartLogin()">開始登入 MT</button>
+  <button onclick="doRefresh()">🔄 重新整理</button>
+</div>
+
+<div class="screen-wrap" id="screenWrap">
+  <div class="no-img" id="noImg">點擊「開始登入 MT」啟動瀏覽器</div>
+  <img id="screenImg" style="display:none" alt="browser">
+</div>
+
+<div class="keyboard-bar">
+  <input id="typeInput" placeholder="在此輸入文字後按 Enter 送出..." onkeydown="if(event.key==='Enter')doType()">
+  <button onclick="doType()">送出文字</button>
+  <button onclick="doKey('Tab')">Tab</button>
+  <button onclick="doKey('Enter')">Enter</button>
+  <button onclick="doKey('Backspace')">←刪除</button>
+</div>
+
+<div class="info-bar">
+  <span>頁面: <b id="infoUrl">-</b></span>
+  <span>標題: <b id="infoTitle">-</b></span>
+  <span>MT連線: <b id="infoConn">-</b></span>
+  <span>桌數: <b id="infoTables">0</b></span>
+</div>
+
+<script>
+const KEY = new URLSearchParams(location.search).get('key') || '';
+const BASE = location.origin;
+const headers = { 'Content-Type': 'application/json', 'X-Admin-Key': KEY };
+let refreshTimer = null;
+let screenActive = false;
+
+// 截圖自動刷新
+function startScreenRefresh() {
+  if (refreshTimer) return;
+  screenActive = true;
+  refreshTimer = setInterval(refreshScreen, 800);
+  refreshScreen();
+}
+
+function stopScreenRefresh() {
+  screenActive = false;
+  if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+}
+
+async function refreshScreen() {
+  try {
+    const ts = Date.now();
+    const img = document.getElementById('screenImg');
+    const noImg = document.getElementById('noImg');
+    img.src = `${BASE}/admin/screenshot?key=${KEY}&t=${ts}`;
+    img.style.display = 'block';
+    noImg.style.display = 'none';
+  } catch (e) {}
+  refreshPageInfo();
+}
+
+async function refreshPageInfo() {
+  try {
+    const r = await fetch(`${BASE}/admin/page-info?key=${KEY}`);
+    const d = await r.json();
+    document.getElementById('infoUrl').textContent = d.url || '-';
+    document.getElementById('infoTitle').textContent = d.title || '-';
+    document.getElementById('infoConn').textContent = d.connected ? '✅ 已連線' : '❌ 未連線';
+    document.getElementById('infoTables').textContent = d.tablesCount || '0';
+
+    const badge = document.getElementById('statusBadge');
+    if (d.connected) {
+      badge.textContent = '已連線 MT';
+      badge.className = 'status on';
+    } else if (d.loginMode) {
+      badge.textContent = '登入中...';
+      badge.className = 'status login';
+    } else {
+      badge.textContent = '未連線';
+      badge.className = 'status off';
+    }
+  } catch (e) {}
+}
+
+// 點擊螢幕
+document.getElementById('screenWrap').addEventListener('click', async (e) => {
+  const img = document.getElementById('screenImg');
+  if (img.style.display === 'none') return;
+  const rect = img.getBoundingClientRect();
+  const scaleX = 1280 / rect.width;
+  const scaleY = 800 / rect.height;
+  const x = Math.round((e.clientX - rect.left) * scaleX);
+  const y = Math.round((e.clientY - rect.top) * scaleY);
+  await fetch(`${BASE}/admin/click?key=${KEY}`, { method: 'POST', headers, body: JSON.stringify({ x, y }) });
+  setTimeout(refreshScreen, 300);
+});
+
+// 按鈕功能
+async function doStartLogin() {
+  await fetch(`${BASE}/admin/start-login?key=${KEY}`, { method: 'POST', headers, body: JSON.stringify({}) });
+  startScreenRefresh();
+}
+
+async function doNavigate() {
+  const url = document.getElementById('urlInput').value.trim();
+  if (!url) return;
+  await fetch(`${BASE}/admin/navigate?key=${KEY}`, { method: 'POST', headers, body: JSON.stringify({ url }) });
+  setTimeout(refreshScreen, 1000);
+}
+
+async function doType() {
+  const input = document.getElementById('typeInput');
+  const text = input.value;
+  if (!text) return;
+  await fetch(`${BASE}/admin/type?key=${KEY}`, { method: 'POST', headers, body: JSON.stringify({ text }) });
+  input.value = '';
+  setTimeout(refreshScreen, 300);
+}
+
+async function doKey(key) {
+  await fetch(`${BASE}/admin/key?key=${KEY}`, { method: 'POST', headers, body: JSON.stringify({ key }) });
+  setTimeout(refreshScreen, 300);
+}
+
+async function doRefresh() {
+  await fetch(`${BASE}/admin/navigate?key=${KEY}`, {
+    method: 'POST', headers,
+    body: JSON.stringify({ url: document.getElementById('infoUrl').textContent })
+  });
+  setTimeout(refreshScreen, 1000);
+}
+
+// 頁面載入時檢查狀態
+refreshPageInfo();
+</script>
+</body>
+</html>
