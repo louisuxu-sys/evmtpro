@@ -340,9 +340,39 @@ class MTConnector extends EventEmitter {
         }
       }
 
-      // 5. 尋找並點擊 MT真人
-      console.log('🎰 自動登入: 尋找 MT真人...');
+      // 5. 先點「真人視訊」進入分類頁
+      console.log('🎰 自動登入: 尋找「真人視訊」分類...');
       await this._sleep(2000);
+
+      const liveClicked = await this.page.evaluate(() => {
+        const all = Array.from(document.querySelectorAll('a, div, span, button, li'));
+        for (const el of all) {
+          const text = (el.textContent || '').trim();
+          // 精確匹配「真人視訊」或「真人」（排除包含太多其他文字的大容器）
+          if ((text === '真人視訊' || text === '真人' || text === 'Live Casino') && el.offsetWidth > 0) {
+            el.click();
+            return { clicked: true, text, tag: el.tagName };
+          }
+        }
+        // 備用：找包含真人視訊的連結
+        for (const el of all) {
+          const text = (el.textContent || '').trim();
+          if (text.includes('真人視訊') && text.length < 20 && el.offsetWidth > 0) {
+            el.click();
+            return { clicked: true, text, tag: el.tagName };
+          }
+        }
+        return { clicked: false };
+      });
+
+      if (liveClicked.clicked) {
+        console.log(`✅ 自動登入: 已點擊 [${liveClicked.text}] <${liveClicked.tag}>`);
+      } else {
+        console.log('⚠️  自動登入: 找不到真人視訊分類，嘗試直接找 MT...');
+      }
+
+      // 等待分類頁載入
+      await this._sleep(3000);
 
       // 攔截 window.open，記錄 popup URL
       await this.page.evaluate(() => {
@@ -354,62 +384,105 @@ class MTConnector extends EventEmitter {
         };
       });
 
-      // 找 MT真人 — 用 JS click 直接點（新分頁由 targetcreated 自動處理）
+      // 5.5 診斷分類頁
+      const diagCat = await this.page.evaluate(() => {
+        return {
+          url: location.href,
+          title: document.title,
+          bodyText: document.body?.innerText?.substring(0, 300) || ''
+        };
+      });
+      console.log(`🔍 診斷: URL=${diagCat.url}`);
+      console.log(`🔍 診斷: body=${diagCat.bodyText.substring(0, 150)}`);
+
+      // 6. 在分類頁中找 MT 並點擊進入
+      console.log('🎰 自動登入: 在分類頁尋找 MT...');
+      await this._sleep(2000);
+
       const mtClicked = await this.page.evaluate(() => {
-        // 策略1: 找「開始登入 MT」「進入MT」「前往MT」按鈕
-        const btns = Array.from(document.querySelectorAll('a, button, div, span'));
-        for (const el of btns) {
+        const all = Array.from(document.querySelectorAll('a, button, div, span, img'));
+
+        // 策略1: 找「進入」「開始」「前往」「Play」按鈕在 MT 區域附近
+        // 先找所有含 MT 的區域
+        for (const el of all) {
           const text = (el.textContent || '').trim();
-          if ((text.includes('開始') || text.includes('進入') || text.includes('前往') || text.includes('登入')) && text.includes('MT')) {
-            const rect = el.getBoundingClientRect();
-            if (rect.width > 0 && rect.height > 0) {
-              el.click();
-              return { clicked: true, text: text.substring(0, 40), tag: el.tagName, method: 'direct-btn' };
+          const alt = (el.alt || el.title || '').trim();
+          if ((!text.includes('MT') && !alt.includes('MT')) ) continue;
+
+          // 找這個元素或其子元素中的「進入」「開始遊戲」按鈕
+          const btns = el.querySelectorAll('a, button, div, span');
+          for (const btn of btns) {
+            const btnText = (btn.textContent || '').trim();
+            if (btnText.includes('進入') || btnText.includes('開始') || btnText.includes('Play') || btnText.includes('play')) {
+              if (btn.offsetWidth > 0 && btn.offsetHeight > 0) {
+                btn.click();
+                return { clicked: true, text: btnText.substring(0, 40), tag: btn.tagName, method: 'mt-enter-btn' };
+              }
             }
           }
-        }
 
-        // 策略2: 找最小的包含「MT真人」或「MT 真人」的可點擊元素
-        let best = null;
-        let bestArea = Infinity;
-        const all = Array.from(document.querySelectorAll('a, div, span, button, img, li'));
-        for (const el of all) {
-          const text = (el.textContent || el.alt || el.title || '').trim();
-          if (!text.includes('MT')) continue;
-          if (!text.includes('真人') && !text.includes('live') && !text.includes('Live')) continue;
+          // 如果 MT 元素本身是小型可點擊元素
           const rect = el.getBoundingClientRect();
-          if (rect.width <= 0 || rect.height <= 0) continue;
-          // 排除太大的元素(大於500px寬的可能是容器)
-          if (rect.width > 500) continue;
-          const area = rect.width * rect.height;
-          if (area < bestArea && area > 50) {
-            bestArea = area;
-            best = el;
+          if (rect.width > 0 && rect.width < 400 && rect.height > 0) {
+            el.click();
+            return { clicked: true, text: (text || alt).substring(0, 40), tag: el.tagName, method: 'mt-element' };
           }
         }
-        if (best) {
-          best.click();
-          const r = best.getBoundingClientRect();
-          return { clicked: true, text: (best.textContent || '').trim().substring(0, 40), tag: best.tagName, method: 'smallest-el', x: Math.round(r.x + r.width/2), y: Math.round(r.y + r.height/2) };
-        }
 
-        // 策略3: data 屬性
-        const dataEls = Array.from(document.querySelectorAll('[data-code*="mt"], [data-code*="MT"], [alt*="MT"]'));
-        if (dataEls.length > 0) {
-          dataEls[0].click();
-          return { clicked: true, text: 'data/alt match', tag: dataEls[0].tagName, method: 'data-attr' };
+        // 策略2: 找所有「進入遊戲」按鈕，然後找離 MT 文字最近的
+        const enterBtns = [];
+        for (const el of all) {
+          const text = (el.textContent || '').trim();
+          if ((text.includes('進入') || text === '開始遊戲' || text === 'Play') && el.offsetWidth > 0 && el.offsetWidth < 200) {
+            const rect = el.getBoundingClientRect();
+            enterBtns.push({ el, rect, text });
+          }
+        }
+        // 找 MT 文字位置
+        for (const el of all) {
+          const text = (el.textContent || '').trim();
+          if (text.includes('MT') && text.length < 30) {
+            const mtRect = el.getBoundingClientRect();
+            // 找最近的「進入」按鈕
+            let closest = null;
+            let closestDist = Infinity;
+            for (const btn of enterBtns) {
+              const dist = Math.abs(btn.rect.y - mtRect.y) + Math.abs(btn.rect.x - mtRect.x);
+              if (dist < closestDist) {
+                closestDist = dist;
+                closest = btn;
+              }
+            }
+            if (closest && closestDist < 300) {
+              closest.el.click();
+              return { clicked: true, text: `MT nearby: ${closest.text}`, tag: closest.el.tagName, method: 'nearest-enter', dist: closestDist };
+            }
+          }
         }
 
         return { clicked: false };
       });
 
       if (!mtClicked.clicked) {
-        console.log('⚠️  自動登入: 找不到 MT真人按鈕');
+        console.log('⚠️  自動登入: 找不到 MT 進入按鈕');
+        // 列出頁面上所有可能的遊戲入口
+        const entries = await this.page.evaluate(() => {
+          const results = [];
+          const all = document.querySelectorAll('a, button, div, span, img');
+          for (const el of all) {
+            const text = (el.textContent || el.alt || '').trim();
+            if (text.length > 2 && text.length < 50 && (text.includes('MT') || text.includes('真人') || text.includes('進入') || text.includes('Play'))) {
+              results.push({ text: text.substring(0, 50), tag: el.tagName, w: el.offsetWidth });
+            }
+          }
+          return results.slice(0, 20);
+        }).catch(() => []);
+        console.log('🔍 頁面上的可能入口:', JSON.stringify(entries));
         this._loginMode = true;
         return false;
       }
 
-      console.log(`✅ 自動登入: 已點擊 MT真人 [${mtClicked.text}] <${mtClicked.tag}> (${mtClicked.method})`);
+      console.log(`✅ 自動登入: 已點擊 MT [${mtClicked.text}] <${mtClicked.tag}> (${mtClicked.method})`);
       const pagesBefore = (await this.browser.pages()).length;
 
       // 5.5 診斷點擊後的頁面狀態
