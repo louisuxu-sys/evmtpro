@@ -74,9 +74,26 @@ class MTConnector extends EventEmitter {
           // 切換到新頁面
           this.page = newPage;
           await this.page.setViewport({ width: 1280, height: 800 });
-          // 在新頁面上設定 CDP 監聽
+
+          // 等待頁面載入完成再 attach CDP（避免太早 attach 錯過 WS）
+          console.log('⏳ MT連線器: 等待新頁面載入...');
+          try {
+            await newPage.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+          } catch (e) {}
+          // 額外等待讓 JS 初始化
+          await new Promise(r => setTimeout(r, 3000));
+
+          // attach CDP 監聽
           await this._attachCDP(newPage);
-          console.log('✅ MT連線器: 已切換到新視窗');
+          console.log('✅ MT連線器: 已切換到新視窗並附加 CDP');
+
+          // 再等一下讓 WS 有時間連線
+          await new Promise(r => setTimeout(r, 5000));
+          // 如果還沒連上，再 attach 一次
+          if (!this.connected) {
+            console.log('🔄 MT連線器: 重新附加 CDP...');
+            await this._attachCDP(newPage);
+          }
         } catch (e) {
           console.error('⚠️ 新視窗處理錯誤:', e.message);
         }
