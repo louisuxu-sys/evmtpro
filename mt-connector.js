@@ -350,60 +350,135 @@ class MTConnector extends EventEmitter {
         const origOpen = window.open;
         window.open = function(url, ...args) {
           window.__popupUrl = url;
-          console.log('POPUP_INTERCEPTED:' + url);
           return origOpen.call(this, url, ...args);
         };
       });
 
-      // 用真實滑鼠點擊（不用 JS click，避免 popup 被擋）
+      // 找 MT真人 — 優先找最小的匹配元素（避免匹配到大容器）
       const mtPos = await this.page.evaluate(() => {
-        const all = Array.from(document.querySelectorAll('a, div, span, button, img, li'));
+        let best = null;
+        let bestArea = Infinity;
+        const all = Array.from(document.querySelectorAll('a, div, span, button, img, li, p'));
         for (const el of all) {
           const text = (el.textContent || el.alt || el.title || '').trim();
-          if (text.includes('MT') && (text.includes('真人') || text.includes('live') || text.includes('Live'))) {
+          if (!text.includes('MT')) continue;
+          if (!text.includes('真人') && !text.includes('live') && !text.includes('Live')) continue;
+          const rect = el.getBoundingClientRect();
+          if (rect.width <= 0 || rect.height <= 0) continue;
+          const area = rect.width * rect.height;
+          // 選最小的可見匹配元素（更精確）
+          if (area < bestArea && area > 100) {
+            bestArea = area;
+            best = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2, w: rect.width, h: rect.height, text: text.substring(0, 40), tag: el.tagName };
+          }
+        }
+        // 備用：data 屬性
+        if (!best) {
+          const imgs = Array.from(document.querySelectorAll('[data-code*="mt"], [data-code*="MT"], [alt*="MT"]'));
+          for (const el of imgs) {
             const rect = el.getBoundingClientRect();
             if (rect.width > 0 && rect.height > 0) {
-              return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2, text: text.substring(0, 30), tag: el.tagName };
+              best = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2, w: rect.width, h: rect.height, text: 'data/alt match', tag: el.tagName };
+              break;
             }
           }
         }
-        // 也嘗試找 data 屬性
-        const imgs = Array.from(document.querySelectorAll('[data-code*="mt"], [data-code*="MT"], [alt*="MT"]'));
-        if (imgs.length > 0) {
-          const rect = imgs[0].getBoundingClientRect();
-          return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2, text: 'data/alt match', tag: imgs[0].tagName };
-        }
-        return null;
-      });
-
-      if (mtPos) {
-        console.log(`✅ 自動登入: 找到 MT真人 [${mtPos.text}] <${mtPos.tag}> at (${Math.round(mtPos.x)},${Math.round(mtPos.y)})`);
-        // 記錄當前頁面數量
-        const pagesBefore = (await this.browser.pages()).length;
-        // 真實滑鼠點擊
-        await this.page.mouse.click(mtPos.x, mtPos.y);
-        console.log('🖱️ 自動登入: 已點擊 MT真人');
-
-        // 等待 popup 視窗出現
-        await this._sleep(5000);
-        const pagesAfter = (await this.browser.pages()).length;
-        console.log(`📄 自動登入: 頁面數 ${pagesBefore} -> ${pagesAfter}`);
-
-        // 如果沒有新頁面，嘗試用攔截到的 popup URL 直接導航
-        if (pagesAfter <= pagesBefore) {
-          const popupUrl = await this.page.evaluate(() => window.__popupUrl);
-          if (popupUrl) {
-            console.log(`🔗 自動登入: popup 被擋，直接導航到 ${popupUrl}`);
-            await this.page.goto(popupUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-          } else {
-            console.log('⚠️  自動登入: 沒有偵測到新視窗或 popup URL');
+        // 如果元素在視窗外，先捲動到它
+        if (best && (best.x < 0 || best.y < 0 || best.x > window.innerWidth || best.y > window.innerHeight)) {
+          // 重新取得元素位置（捲動後）
+          for (const el of all) {
+            const text = (el.textContent || el.alt || '').trim();
+            if (text.includes('MT') && (text.includes('真人') || text.includes('live'))) {
+              const rect = el.getBoundingClientRect();
+              const area = rect.width * rect.height;
+              if (area === bestArea) {
+                el.scrollIntoView({ block: 'center', inline: 'center' });
+                break;
+              }
+            }
           }
         }
-      } else {
+        return best;
+      });
+
+      if (!mtPos) {
         console.log('⚠️  自動登入: 找不到 MT真人按鈕');
-        console.log('   請到管理員介面手動點擊: /admin/login?key=ADMIN_KEY');
         this._loginMode = true;
         return false;
+      }
+
+      // 如果座標在視窗外，先等捲動完成再取新座標
+      await this._sleep(500);
+      const finalPos = await this.page.evaluate((origText) => {
+        const all = Array.from(document.querySelectorAll('a, div, span, button, img, li, p'));
+        let best = null;
+        let bestArea = Infinity;
+        for (const el of all) {
+          const text = (el.textContent || el.alt || '').trim();
+          if (!text.includes('MT') || (!text.includes('真人') && !text.includes('live'))) continue;
+          const rect = el.getBoundingClientRect();
+          if (rect.width <= 0 || rect.height <= 0) continue;
+          const area = rect.width * rect.height;
+          if (area < bestArea && area > 100 && rect.x >= 0 && rect.y >= 0) {
+            bestArea = area;
+            best = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2, text: text.substring(0, 40), tag: el.tagName };
+          }
+        }
+        return best;
+      });
+
+      const clickTarget = (finalPos && finalPos.x > 0 && finalPos.y > 0) ? finalPos : mtPos;
+      console.log(`✅ 自動登入: 找到 MT真人 [${clickTarget.text}] <${clickTarget.tag}> at (${Math.round(clickTarget.x)},${Math.round(clickTarget.y)})`);
+
+      // 記錄當前頁面數量
+      const pagesBefore = (await this.browser.pages()).length;
+      // 真實滑鼠點擊
+      await this.page.mouse.click(clickTarget.x, clickTarget.y);
+      console.log('🖱️ 自動登入: 已點擊 MT真人');
+
+      // 5.5 點擊 MT 後可能出現確認彈窗
+      console.log('📢 自動登入: 檢查 MT 進入確認彈窗...');
+      for (let i = 0; i < 5; i++) {
+        await this._sleep(2000);
+        const confirmResult = await this.page.evaluate(() => {
+          const btns = Array.from(document.querySelectorAll('button, a, div, span'));
+          for (const btn of btns) {
+            const text = (btn.textContent || '').trim();
+            const style = window.getComputedStyle(btn);
+            if (style.display === 'none' || style.visibility === 'hidden') continue;
+            if (btn.offsetWidth === 0 || btn.offsetHeight === 0) continue;
+            if (text === '確認' || text === '確定' || text === '進入遊戲' || text === '開始遊戲' || text === '立即進入' || text === 'OK' || text === '前往') {
+              btn.click();
+              return { found: true, text };
+            }
+          }
+          return { found: false };
+        });
+        if (confirmResult.found) {
+          console.log(`  ✅ 已點擊確認 [${confirmResult.text}] (${i + 1})`);
+        } else {
+          console.log(`  ✅ 無更多確認彈窗`);
+          break;
+        }
+      }
+
+      // 等待 popup 視窗出現
+      await this._sleep(5000);
+      const pagesAfter = (await this.browser.pages()).length;
+      console.log(`📄 自動登入: 頁面數 ${pagesBefore} -> ${pagesAfter}`);
+
+      // 如果有新頁面，targetcreated 會自動切換
+      // 如果沒有新頁面，嘗試用攔截到的 popup URL 直接導航
+      if (pagesAfter <= pagesBefore) {
+        const popupUrl = await this.page.evaluate(() => window.__popupUrl);
+        if (popupUrl) {
+          console.log(`🔗 自動登入: popup 被擋，直接導航到 ${popupUrl}`);
+          await this.page.goto(popupUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        } else {
+          console.log('⚠️  自動登入: 沒有偵測到新視窗，嘗試直接進入 MT...');
+          // 最後手段：直接導航到 MT 頁面
+          await this.page.goto(this.pageUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        }
       }
 
       // 6. 等待 MT 載入
