@@ -412,7 +412,40 @@ class MTConnector extends EventEmitter {
       console.log(`✅ 自動登入: 已點擊 MT真人 [${mtClicked.text}] <${mtClicked.tag}> (${mtClicked.method})`);
       const pagesBefore = (await this.browser.pages()).length;
 
-      // 5.5 點擊 MT 後可能出現確認彈窗
+      // 5.5 診斷點擊後的頁面狀態
+      await this._sleep(3000);
+      const diag = await this.page.evaluate(() => {
+        const iframes = document.querySelectorAll('iframe');
+        const iframeInfo = Array.from(iframes).map(f => ({ src: f.src || f.getAttribute('src') || '', w: f.offsetWidth, h: f.offsetHeight }));
+        return {
+          url: location.href,
+          title: document.title,
+          iframeCount: iframes.length,
+          iframes: iframeInfo,
+          bodyText: document.body?.innerText?.substring(0, 200) || ''
+        };
+      });
+      console.log(`🔍 診斷: URL=${diag.url}`);
+      console.log(`🔍 診斷: title=${diag.title}`);
+      console.log(`🔍 診斷: iframe數=${diag.iframeCount}`);
+      if (diag.iframes.length > 0) {
+        diag.iframes.forEach((f, i) => console.log(`🔍 診斷: iframe[${i}] src=${f.src} (${f.w}x${f.h})`));
+      }
+      console.log(`🔍 診斷: body前200字=${diag.bodyText.substring(0, 100)}`);
+
+      // 如果有 iframe 包含 MT/ofalive，切換到 iframe 監聽
+      if (diag.iframes.length > 0) {
+        for (const frame of this.page.frames()) {
+          const fUrl = frame.url();
+          if (fUrl.includes('ofalive') || fUrl.includes('game') || fUrl.includes('mt')) {
+            console.log(`🔗 自動登入: 偵測到 MT iframe: ${fUrl}`);
+            // 在 iframe 上也 attach CDP
+            // CDP 已在主頁面 attach，iframe 的 WS 也會被捕捉
+          }
+        }
+      }
+
+      // 點擊 MT 後可能出現確認彈窗
       console.log('📢 自動登入: 檢查 MT 進入確認彈窗...');
       for (let i = 0; i < 5; i++) {
         await this._sleep(2000);
