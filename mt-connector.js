@@ -183,6 +183,192 @@ class MTConnector extends EventEmitter {
     return true;
   }
 
+  // ===== 全自動登入 =====
+  async autoLogin() {
+    const casinoUrl = process.env.MT_CASINO_URL;
+    const username = process.env.MT_CASINO_USERNAME;
+    const password = process.env.MT_CASINO_PASSWORD;
+
+    if (!casinoUrl || !username || !password) {
+      console.log('⚠️  自動登入: 未設定 MT_CASINO_URL / MT_CASINO_USERNAME / MT_CASINO_PASSWORD');
+      console.log('   請到管理員介面手動登入: /admin/login?key=ADMIN_KEY');
+      return false;
+    }
+
+    console.log('🤖 自動登入: 開始...');
+    if (!this.browser) await this.launchBrowser();
+
+    try {
+      // 1. 打開娛樂城
+      console.log(`🌐 自動登入: 前往 ${casinoUrl}`);
+      await this.page.goto(casinoUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+      await this._sleep(2000);
+
+      // 2. 尋找帳號密碼欄位並填入
+      console.log('🔑 自動登入: 填入帳號密碼...');
+
+      // 嘗試多種常見選擇器
+      const filled = await this.page.evaluate((user, pass) => {
+        // 找所有 input 欄位
+        const inputs = Array.from(document.querySelectorAll('input'));
+        let userInput = null;
+        let passInput = null;
+
+        for (const inp of inputs) {
+          const type = (inp.type || '').toLowerCase();
+          const name = (inp.name || '').toLowerCase();
+          const placeholder = (inp.placeholder || '').toLowerCase();
+          const id = (inp.id || '').toLowerCase();
+
+          // 帳號欄位
+          if (!userInput && (
+            type === 'text' || type === 'tel' || type === '' ||
+            name.includes('user') || name.includes('account') || name.includes('login') ||
+            placeholder.includes('帳號') || placeholder.includes('用戶') || placeholder.includes('username') ||
+            id.includes('user') || id.includes('account')
+          ) && type !== 'password' && type !== 'hidden') {
+            userInput = inp;
+          }
+
+          // 密碼欄位
+          if (!passInput && type === 'password') {
+            passInput = inp;
+          }
+        }
+
+        if (userInput && passInput) {
+          // 清除 + 填入
+          userInput.focus();
+          userInput.value = '';
+          userInput.dispatchEvent(new Event('input', { bubbles: true }));
+          userInput.value = user;
+          userInput.dispatchEvent(new Event('input', { bubbles: true }));
+          userInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+          passInput.focus();
+          passInput.value = '';
+          passInput.dispatchEvent(new Event('input', { bubbles: true }));
+          passInput.value = pass;
+          passInput.dispatchEvent(new Event('input', { bubbles: true }));
+          passInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+          return { found: true, userField: userInput.name || userInput.id, passField: passInput.name || passInput.id };
+        }
+
+        return { found: false, inputCount: inputs.length };
+      }, username, password);
+
+      if (!filled.found) {
+        console.log(`⚠️  自動登入: 找不到帳密欄位 (共 ${filled.inputCount} 個 input)`);
+        console.log('   請到管理員介面手動登入');
+        this._loginMode = true;
+        return false;
+      }
+
+      console.log(`✅ 自動登入: 已填入帳密 (${filled.userField} / ${filled.passField})`);
+      await this._sleep(500);
+
+      // 3. 點擊登入按鈕
+      const clicked = await this.page.evaluate(() => {
+        // 找登入按鈕
+        const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], a'));
+        for (const btn of buttons) {
+          const text = (btn.textContent || btn.value || '').trim();
+          if (text.includes('登入') || text.includes('登录') || text.includes('Login') || text.includes('Sign in')) {
+            btn.click();
+            return { clicked: true, text };
+          }
+        }
+        // 備用：找 form 然後 submit
+        const form = document.querySelector('form');
+        if (form) {
+          form.submit();
+          return { clicked: true, text: 'form.submit()' };
+        }
+        return { clicked: false };
+      });
+
+      if (clicked.clicked) {
+        console.log(`✅ 自動登入: 點擊登入 [${clicked.text}]`);
+      } else {
+        console.log('⚠️  自動登入: 找不到登入按鈕，嘗試按 Enter');
+        await this.page.keyboard.press('Enter');
+      }
+
+      // 4. 等待登入完成
+      console.log('⏳ 自動登入: 等待登入結果...');
+      await this._sleep(5000);
+
+      const afterLoginUrl = this.page.url();
+      console.log(`📍 自動登入: 目前頁面 ${afterLoginUrl}`);
+
+      // 5. 尋找並點擊 MT真人
+      console.log('🎰 自動登入: 尋找 MT真人...');
+      await this._sleep(2000);
+
+      const mtClicked = await this.page.evaluate(() => {
+        // 找包含 MT 的元素
+        const all = Array.from(document.querySelectorAll('a, div, span, button, img, li'));
+        for (const el of all) {
+          const text = (el.textContent || el.alt || el.title || '').trim();
+          if (text.includes('MT') && (text.includes('真人') || text.includes('live') || text.includes('Live'))) {
+            el.click();
+            return { clicked: true, text, tag: el.tagName };
+          }
+        }
+        // 也嘗試找圖片 alt 或 data 屬性
+        const imgs = Array.from(document.querySelectorAll('[data-code*="mt"], [data-code*="MT"], [alt*="MT"]'));
+        if (imgs.length > 0) {
+          imgs[0].click();
+          return { clicked: true, text: 'data/alt match', tag: imgs[0].tagName };
+        }
+        return { clicked: false };
+      });
+
+      if (mtClicked.clicked) {
+        console.log(`✅ 自動登入: 已點擊 MT真人 [${mtClicked.text}] <${mtClicked.tag}>`);
+      } else {
+        console.log('⚠️  自動登入: 找不到 MT真人按鈕');
+        console.log('   請到管理員介面手動點擊: /admin/login?key=ADMIN_KEY');
+        this._loginMode = true;
+        return false;
+      }
+
+      // 6. 等待 MT 載入 + popup 視窗
+      console.log('⏳ 自動登入: 等待 MT 載入...');
+      await this._sleep(8000);
+
+      if (this.connected) {
+        console.log('🎉 自動登入: 成功！MT WebSocket 已連線');
+        return true;
+      }
+
+      // 等更久一點
+      console.log('⏳ 自動登入: 繼續等待 WebSocket...');
+      for (let i = 0; i < 10; i++) {
+        await this._sleep(3000);
+        if (this.connected) {
+          console.log('🎉 自動登入: 成功！MT WebSocket 已連線');
+          return true;
+        }
+      }
+
+      console.log('⚠️  自動登入: MT 載入超時，可能需要手動操作');
+      console.log('   請到管理員介面: /admin/login?key=ADMIN_KEY');
+      this._loginMode = true;
+      return false;
+
+    } catch (err) {
+      console.error('❌ 自動登入失敗:', err.message);
+      this._loginMode = true;
+      return false;
+    }
+  }
+
+  _sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
   // 處理從瀏覽器收到的 WebSocket 訊息
   _onWsMessage(wsUrl, rawData) {
     try {
