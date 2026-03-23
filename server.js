@@ -277,12 +277,29 @@ function fmtHand(cards) {
 function getRoomList() {
   if (tables.size === 0) return '⏳ 正在連線 MT 平台，請稍候...';
 
-  let text = `� 百家之眼 - 百家樂房間\n━━━━━━━━━━━━━━━━\n`;
+  let text = `🎰 百家之眼 - 百家樂房間\n━━━━━━━━━━━━━━━━\n`;
+  let count = 0;
   for (const [id, engine] of tables) {
-    const dealer = engine.dealer || '未知';
-    text += `\n第${id}廳 | 荷官: ${dealer}`;
+    count++;
+    if (count > 20) {
+      text += `\n... 還有 ${tables.size - 20} 個房間`;
+      break;
+    }
+    const name = engine.tableName || `第${id}廳`;
+    const hands = engine.handCount || 0;
+    const state = engine.getState();
+    // 顯示統計（如果有）
+    const mtId = localToMtMap.get(id);
+    const mtInfo = mtId ? mtConnector.tables.get(mtId) : null;
+    const summary = mtInfo?.summary;
+    if (summary && summary.total > 0) {
+      text += `\n${id}. ${name} | ${summary.total}局 莊${summary.banker} 閒${summary.player} 和${summary.tie}`;
+    } else {
+      text += `\n${id}. ${name} | ${hands}局`;
+    }
   }
   text += `\n\n━━━━━━━━━━━━━━━━\n`;
+  text += `共 ${tables.size} 個房間\n`;
   text += `輸入數字跟隨房間，如: 3\n`;
   text += `跟隨後自動推送每手牌型及EV`;
   return text;

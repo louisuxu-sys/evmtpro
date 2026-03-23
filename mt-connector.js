@@ -794,21 +794,26 @@ class MTConnector extends EventEmitter {
 
     if (!tableId) return;
 
+    // 只處理百家樂桌 — gc 開頭 + 6 位數字
+    if (!tableId.match(/^gc\d{6}$/i)) return;
+
     // Summary 訊息 — 包含牌桌統計 + 歷史記錄
     if (d.Summary) {
       const summary = d.Summary;
-      const tableName = `百家樂 ${tableNum || tableId}`;
+      // 從 tableId 提取桌號：gc023002 -> 23-2 號桌
+      const idNum = tableId.replace(/^gc0*/i, '');
+      const tableName = `百家 ${idNum}`;
 
       // 建立/更新牌桌
       if (!this.tables.has(tableId)) {
         const info = {
           tableId,
           tableName,
-          dealer: { name: '未知荷官' },
+          dealer: { name: '-' },
           shoe: null,
           round: summary.Total || 0,
           state: 'active',
-          hall: '',
+          hall: tableNum ? `廳${tableNum}` : '',
           summary: {
             total: summary.Total || 0,
             banker: summary.Banker || 0,
@@ -830,20 +835,23 @@ class MTConnector extends EventEmitter {
         info.round = summary.Total || 0;
       }
 
-      // 發出牌桌列表更新
+      // 發出牌桌列表更新（只發百家樂桌）
       this.emit('tables_list', Array.from(this.tables.values()));
 
-      // 如果 List 包含最新一局的牌面資料
+      // 追蹤最新局號，只 emit 新的開牌
       if (d.List && Array.isArray(d.List) && d.List.length > 0) {
         const lastRound = d.List[d.List.length - 1];
-        this._processDDRound(tableId, lastRound, summary);
+        if (!this._lastRound) this._lastRound = {};
+        const lastA = this._lastRound[tableId];
+        if (lastRound.A && lastRound.A !== lastA) {
+          this._lastRound[tableId] = lastRound.A;
+          this._processDDRound(tableId, lastRound, summary);
+        }
       }
     }
 
     // 帶牌面的開牌結果
-    // 格式: D.List 含 P1-P3(閒牌), B1-B3(莊牌), WB(莊點), WP(閒點)
     if (d.P1 !== undefined || d.Total !== undefined) {
-      // 完整開牌訊息
       this._processDDFullResult(tableId, d);
     }
   }
