@@ -303,6 +303,43 @@ class MTConnector extends EventEmitter {
       const afterLoginUrl = this.page.url();
       console.log(`📍 自動登入: 目前頁面 ${afterLoginUrl}`);
 
+      // 4.5 關閉公告彈窗（可能有多個，如 1/3, 2/3, 3/3）
+      console.log('📢 自動登入: 關閉公告彈窗...');
+      for (let i = 0; i < 10; i++) {
+        await this._sleep(1500);
+        const dismissed = await this.page.evaluate(() => {
+          // 找「確認」「確定」「關閉」「我知道了」按鈕
+          const btns = Array.from(document.querySelectorAll('button, a, div, span'));
+          for (const btn of btns) {
+            const text = (btn.textContent || '').trim();
+            const style = window.getComputedStyle(btn);
+            // 只點擊可見的按鈕
+            if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
+            if (btn.offsetWidth === 0 || btn.offsetHeight === 0) continue;
+            if (text === '確認' || text === '確定' || text === '關閉' || text === '我知道了' || text === 'OK' || text === 'Close') {
+              btn.click();
+              return { found: true, text };
+            }
+          }
+          // 也找 X 關閉按鈕
+          const closeBtns = Array.from(document.querySelectorAll('.close, .modal-close, [class*="close"], [aria-label="Close"]'));
+          for (const btn of closeBtns) {
+            if (btn.offsetWidth > 0 && btn.offsetHeight > 0) {
+              btn.click();
+              return { found: true, text: 'X close' };
+            }
+          }
+          return { found: false };
+        });
+
+        if (dismissed.found) {
+          console.log(`  ✅ 已關閉彈窗 [${dismissed.text}] (${i + 1})`);
+        } else {
+          console.log(`  ✅ 沒有更多彈窗了 (共關閉 ${i} 個)`);
+          break;
+        }
+      }
+
       // 5. 尋找並點擊 MT真人
       console.log('🎰 自動登入: 尋找 MT真人...');
       await this._sleep(2000);
