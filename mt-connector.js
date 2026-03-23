@@ -60,9 +60,27 @@ class MTConnector extends EventEmitter {
     );
 
     // 啟動 CDP 監聽
-    this.cdp = await this.page.createCDPSession();
-    await this.cdp.send('Network.enable');
-    this._setupCDPListeners();
+    await this._attachCDP(this.page);
+
+    // 監聽 popup（新視窗/分頁）— 娛樂城點MT會開新視窗
+    this.browser.on('targetcreated', async (target) => {
+      if (target.type() === 'page') {
+        try {
+          const newPage = await target.page();
+          if (!newPage) return;
+          const url = newPage.url();
+          console.log(`🔗 MT連線器: 偵測到新視窗 ${url}`);
+          // 切換到新頁面
+          this.page = newPage;
+          await this.page.setViewport({ width: 1280, height: 800 });
+          // 在新頁面上設定 CDP 監聽
+          await this._attachCDP(newPage);
+          console.log('✅ MT連線器: 已切換到新視窗');
+        } catch (e) {
+          console.error('⚠️ 新視窗處理錯誤:', e.message);
+        }
+      }
+    });
 
     // 監控瀏覽器關閉
     this.browser.on('disconnected', () => {
@@ -72,6 +90,21 @@ class MTConnector extends EventEmitter {
 
     console.log('✅ MT連線器: 瀏覽器已就緒');
     return true;
+  }
+
+  // 在指定頁面上附加 CDP 監聽
+  async _attachCDP(page) {
+    try {
+      if (this.cdp) {
+        try { await this.cdp.detach(); } catch (e) {}
+      }
+      this.cdp = await page.createCDPSession();
+      await this.cdp.send('Network.enable');
+      this._wsMap.clear();
+      this._setupCDPListeners();
+    } catch (e) {
+      console.error('⚠️ CDP 附加錯誤:', e.message);
+    }
   }
 
   // 設定 CDP WebSocket 監聽
