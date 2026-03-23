@@ -76,24 +76,31 @@ class MTConnector extends EventEmitter {
           this.page = newPage;
           await this.page.setViewport({ width: 1280, height: 800 });
 
-          // 等待頁面載入完成再 attach CDP（避免太早 attach 錯過 WS）
-          console.log('⏳ MT連線器: 等待新頁面載入...');
-          try {
-            await newPage.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
-          } catch (e) {}
-          // 額外等待讓 JS 初始化
-          await new Promise(r => setTimeout(r, 3000));
-
-          // attach CDP 監聽
+          // 立即 attach CDP（不等頁面載入完，避免錯過早期 WS）
           await this._attachCDP(newPage);
           console.log('✅ MT連線器: 已切換到新視窗並附加 CDP');
 
-          // 再等一下讓 WS 有時間連線
-          await new Promise(r => setTimeout(r, 5000));
-          // 如果還沒連上，再 attach 一次
-          if (!this.connected) {
-            console.log('🔄 MT連線器: 重新附加 CDP...');
+          // 持續監控：等頁面載入 + 多次重新 attach CDP
+          for (let retry = 0; retry < 6; retry++) {
+            await new Promise(r => setTimeout(r, 5000));
+            if (this.connected) {
+              console.log('🎉 MT連線器: WebSocket 已連線！');
+              break;
+            }
+            const curUrl = await newPage.url();
+            const curTitle = await newPage.title();
+            console.log(`🔄 MT連線器: 重試 CDP (${retry+1}/6) URL=${curUrl.substring(0,80)} title=${curTitle}`);
             await this._attachCDP(newPage);
+
+            // 如果頁面 URL 改變了（跳轉完成），再等多一點
+            if (!curUrl.includes('loading')) {
+              console.log('📄 MT連線器: 頁面已跳轉，等待 WS...');
+              await new Promise(r => setTimeout(r, 5000));
+              if (this.connected) {
+                console.log('🎉 MT連線器: WebSocket 已連線！');
+                break;
+              }
+            }
           }
         } catch (e) {
           console.error('⚠️ 新視窗處理錯誤:', e.message);
@@ -126,13 +133,16 @@ class MTConnector extends EventEmitter {
     }
   }
 
-  // 設定 CDP WebSocket 監聽
+  // 設定 CDP WebSocket 監聯
   _setupCDPListeners() {
     this.cdp.on('Network.webSocketCreated', ({ requestId, url }) => {
       this._wsMap.set(requestId, url);
-      if (url.includes('/game/ws')) {
-        console.log(`✅ MT連線器: Game WebSocket 已連線`);
+      console.log(`🔌 CDP: WS 建立 ${url}`);
+      // 接受多種 MT WS 路徑
+      if (url.includes('/game/ws') || url.includes('ws.') || url.includes('/ws') || url.includes('socket')) {
+        console.log(`✅ MT連線器: Game WebSocket 已連線 ${url}`);
         this.connected = true;
+        this._gameWsId = requestId;
         this._loginMode = false;
         this.emit('connected');
       }
@@ -141,7 +151,8 @@ class MTConnector extends EventEmitter {
     this.cdp.on('Network.webSocketClosed', ({ requestId }) => {
       const url = this._wsMap.get(requestId) || '';
       this._wsMap.delete(requestId);
-      if (url.includes('/game/ws')) {
+      console.log(`🔌 CDP: WS 關閉 ${url}`);
+      if (requestId === this._gameWsId || url.includes('/game/ws')) {
         console.log(`🔌 MT連線器: Game WebSocket 斷線`);
         this.connected = false;
       }
@@ -149,7 +160,7 @@ class MTConnector extends EventEmitter {
 
     this.cdp.on('Network.webSocketFrameReceived', ({ requestId, response }) => {
       const url = this._wsMap.get(requestId) || '';
-      if (!url.includes('/game/ws')) return;
+      // 接受所有 WS 訊息，不再限制 /game/ws
       try {
         if (response.payloadData) {
           this._onWsMessage(url, response.payloadData);
