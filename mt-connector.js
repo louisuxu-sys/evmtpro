@@ -37,13 +37,14 @@ class MTConnector extends EventEmitter {
 
     console.log('🔌 MT連線器: 啟動瀏覽器...');
     const launchOpts = {
-      headless: 'new',
+      headless: false,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-gpu',
         '--disable-popup-blocking',
+        '--disable-blink-features=AutomationControlled',
         '--window-size=1280,800'
       ],
       ignoreDefaultArgs: ['--enable-automation']
