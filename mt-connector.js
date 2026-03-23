@@ -646,22 +646,50 @@ class MTConnector extends EventEmitter {
 
   // 處理從瀏覽器收到的 WebSocket 訊息
   _onWsMessage(wsUrl, rawData) {
+    // 記錄前 20 筆原始訊息
+    if (!this._rawMsgCount) this._rawMsgCount = 0;
+    this._rawMsgCount++;
+    if (this._rawMsgCount <= 20) {
+      console.log(`📩 WS原始[${this._rawMsgCount}] (${wsUrl.substring(0, 50)}): ${String(rawData).substring(0, 300)}`);
+    }
+
     try {
       const msg = JSON.parse(rawData);
 
       if (this.logMessages) {
-        this.messageLog.push({ time: new Date().toISOString(), msg });
+        this.messageLog.push({ time: new Date().toISOString(), wsUrl, msg });
         if (this.messageLog.length > 500) this.messageLog.shift();
       }
 
       this.handleMessage(msg);
     } catch (err) {
-      // 非 JSON 訊息忽略
+      // 非 JSON 訊息 - 可能是 SignalR 格式
+      // SignalR 用 \x1e (Record Separator) 分隔訊息
+      if (typeof rawData === 'string' && rawData.includes('\x1e')) {
+        const parts = rawData.split('\x1e').filter(p => p.trim());
+        for (const part of parts) {
+          try {
+            const msg = JSON.parse(part);
+            if (this.logMessages) {
+              this.messageLog.push({ time: new Date().toISOString(), wsUrl, msg });
+              if (this.messageLog.length > 500) this.messageLog.shift();
+            }
+            this.handleMessage(msg);
+          } catch (e) {}
+        }
+      }
     }
   }
 
   // ===== 訊息處理 =====
   handleMessage(msg) {
+    // === SignalR 格式: { type: 1, target: "MethodName", arguments: [...] } ===
+    if (msg.type === 1 && msg.target && msg.arguments) {
+      this._handleSignalRMessage(msg);
+      return;
+    }
+
+    // === 原始 MT 格式 ===
     // 取得 action 名稱（兩種格式）
     let actionName = '';
     if (typeof msg.action === 'string') {
@@ -706,6 +734,192 @@ class MTConnector extends EventEmitter {
         actionName.includes('/logout') || actionName.includes('/banner')) {
       return;
     }
+  }
+
+  // ===== SignalR 訊息處理 =====
+  _handleSignalRMessage(msg) {
+    const target = msg.target;
+    const args = msg.arguments || [];
+
+    // 記錄前 30 筆不同 target
+    if (!this._signalrTargets) this._signalrTargets = new Set();
+    if (this._signalrTargets.size < 30) {
+      if (!this._signalrTargets.has(target)) {
+        this._signalrTargets.add(target);
+        console.log(`📡 SignalR target: "${target}" args[0]=${JSON.stringify(args[0]).substring(0, 200)}`);
+      }
+    }
+
+    const data = args[0]; // 通常第一個參數是主要資料
+
+    // ---- 牌桌列表 ----
+    if (target === 'TableList' || target === 'tableList' || target === 'GameTableList' ||
+        target === 'ReceiveTableList' || target === 'UpdateTableList' ||
+        target.toLowerCase().includes('tablelist') || target.toLowerCase().includes('tables')) {
+      this._handleSignalRTables(data, args);
+      return;
+    }
+
+    // ---- 開牌結果 ----
+    if (target === 'GameResult' || target === 'gameResult' || target === 'Result' ||
+        target === 'ReceiveGameResult' || target === 'ShowResult' ||
+        target.toLowerCase().includes('result') || target.toLowerCase().includes('summary')) {
+      this._handleSignalRResult(data, args);
+      return;
+    }
+
+    // ---- 發牌/牌面 ----
+    if (target === 'DealCard' || target === 'dealCard' || target === 'ShowCard' ||
+        target.toLowerCase().includes('card') || target.toLowerCase().includes('deal')) {
+      this._handleSignalRDeal(data, args);
+      return;
+    }
+
+    // ---- 路紙 ----
+    if (target.toLowerCase().includes('road') || target.toLowerCase().includes('bead')) {
+      this.emit('road_update', data);
+      return;
+    }
+
+    // ---- 遊戲狀態 ----
+    if (target.toLowerCase().includes('status') || target.toLowerCase().includes('state') ||
+        target.toLowerCase().includes('round') || target.toLowerCase().includes('game')) {
+      // 有些狀態訊息也帶牌桌資料
+      if (data && typeof data === 'object') {
+        // 嘗試提取牌桌列表
+        const tables = data.tables || data.tableList || data.data?.tables;
+        if (Array.isArray(tables) && tables.length > 0) {
+          this._handleSignalRTables(data, args);
+        }
+      }
+      return;
+    }
+  }
+
+  // SignalR: 處理牌桌列表
+  _handleSignalRTables(data, args) {
+    let tablesArr = [];
+
+    // 嘗試各種格式
+    if (Array.isArray(data)) {
+      tablesArr = data;
+    } else if (data && Array.isArray(data.tables)) {
+      tablesArr = data.tables;
+    } else if (data && Array.isArray(data.tableList)) {
+      tablesArr = data.tableList;
+    } else if (data && Array.isArray(data.data)) {
+      tablesArr = data.data;
+    } else if (args.length > 1 && Array.isArray(args[1])) {
+      tablesArr = args[1];
+    }
+
+    if (tablesArr.length === 0) return;
+    console.log(`📋 SignalR: 收到 ${tablesArr.length} 張牌桌資料`);
+
+    const baccaratTables = [];
+    for (const t of tablesArr) {
+      // 取得 tableId（各種可能的欄位名）
+      const tableId = t.tableId || t.table_id || t.TableId || t.id || t.ID;
+      if (!tableId) continue;
+
+      // 取得桌名
+      const tableName = t.tableName || t.table_name || t.TableName || t.name || tableId;
+
+      // 取得荷官
+      const dealerRaw = t.dealer || t.Dealer || t.dealerInfo || t.DealerInfo;
+      const dealer = this.parseDealerInfo(dealerRaw);
+
+      // 過濾百家樂（彈性判斷）
+      const gameType = (t.gameType || t.game_type || t.GameType || t.gametype_id || t.gameTypeId || '').toString().toLowerCase();
+      const idLower = tableId.toLowerCase();
+      const nameLower = tableName.toLowerCase();
+
+      const isBaccarat = idLower.startsWith('ba') || idLower.includes('bac') ||
+        gameType.includes('bac') || gameType.includes('ba') ||
+        nameLower.includes('百家') || nameLower.includes('baccarat');
+
+      // 如果無法判斷遊戲類型，先全部收（之後再過濾）
+      if (!isBaccarat && gameType && !gameType.includes('bac')) continue;
+
+      const info = {
+        tableId,
+        tableName,
+        dealer,
+        shoe: t.shoe || t.Shoe || t.shoeNo || null,
+        round: t.round || t.Round || t.roundNo || null,
+        state: t.status || t.state || t.Status || t.State,
+        hall: t.hall || t.Hall || '',
+        _raw: t
+      };
+      this.tables.set(tableId, info);
+      baccaratTables.push(info);
+    }
+
+    if (baccaratTables.length > 0) {
+      console.log(`📋 SignalR: ${baccaratTables.length} 張百家樂桌`);
+      this.emit('tables_list', baccaratTables);
+    }
+  }
+
+  // SignalR: 處理開牌結果
+  _handleSignalRResult(data, args) {
+    if (!data || typeof data !== 'object') return;
+
+    const tableId = data.tableId || data.table_id || data.TableId;
+    if (!tableId) return;
+
+    // 嘗試解析牌面
+    let playerCards = [];
+    let bankerCards = [];
+
+    // 格式1: result 陣列 [p1,b1,p2,b2,p3,b3]
+    const resultArr = data.result || data.Result || data.cards || data.Cards;
+    if (Array.isArray(resultArr)) {
+      const cards = resultArr.slice(0, 6).map(n => (n > 0) ? this.decodeCardNumber(n) : null);
+      playerCards = [cards[0], cards[2], cards[4]].filter(c => c !== null);
+      bankerCards = [cards[1], cards[3], cards[5]].filter(c => c !== null);
+    }
+
+    // 格式2: playerCards/bankerCards 分開
+    if (playerCards.length === 0 && data.playerCards) {
+      playerCards = Array.isArray(data.playerCards) ? data.playerCards.map(n => this.decodeCardNumber(n)).filter(c => c) : [];
+    }
+    if (bankerCards.length === 0 && data.bankerCards) {
+      bankerCards = Array.isArray(data.bankerCards) ? data.bankerCards.map(n => this.decodeCardNumber(n)).filter(c => c) : [];
+    }
+
+    // 贏家
+    const winner = this.normalizeWinner(data.winner || data.Winner || data.winSide || data.WinSide || '');
+
+    const playerTotal = this.calcTotal(playerCards);
+    const bankerTotal = this.calcTotal(bankerCards);
+
+    if (playerCards.length > 0 || winner) {
+      console.log(`🃏 SignalR開牌: ${tableId} ` +
+        `閒[${playerCards.map(c => this.formatCard(c)).join(' ')}]=${playerTotal} ` +
+        `莊[${bankerCards.map(c => this.formatCard(c)).join(' ')}]=${bankerTotal} ` +
+        `→ ${winner === 'B' ? '莊贏' : winner === 'P' ? '閒贏' : '和'}`);
+
+      this.emit('game_result', {
+        tableId,
+        shoe: data.shoe || data.Shoe || data.shoeNo,
+        round: data.round || data.Round || data.roundNo,
+        playerCards,
+        bankerCards,
+        playerTotal,
+        bankerTotal,
+        winner,
+        playerPair: playerCards.length >= 2 && playerCards[0]?.rank === playerCards[1]?.rank,
+        bankerPair: bankerCards.length >= 2 && bankerCards[0]?.rank === bankerCards[1]?.rank,
+      });
+    }
+  }
+
+  // SignalR: 處理發牌
+  _handleSignalRDeal(data, args) {
+    // 記錄發牌資料（可能需要累積後再 emit）
+    if (!data || typeof data !== 'object') return;
+    // 大部分情況 result 已經包含完整牌面，這裡只做記錄
   }
 
   // ===== 處理牌桌列表 =====
