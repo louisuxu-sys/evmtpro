@@ -335,21 +335,31 @@ function getRoomList() {
 // 格式化每手開牌結果 (推送給跟隨用戶)
 function formatHandResult(localId, engine, ev, detail) {
   const state = engine.getState();
-  let msg = `━━━━━━━━━━━━━━━━\n`;
-  msg += `第${localId}廳 | 靴 ${state.handCount > 0 ? state.handCount : '-'} 第${detail?.hand || '-'}手\n`;
-  msg += `荷官: ${state.dealer || '未知荷官'}\n`;
+  const shoe = state.shoeNum || '-';
+  const hand = detail?.hand || state.handCount || '-';
+  const dealer = state.dealer || '-';
 
-  if (detail && detail.playerCards.length > 0) {
+  let msg = `第${localId}廳 | 靴 ${shoe} 第${hand}手\n`;
+  msg += `荷官: ${dealer}\n`;
+
+  if (detail && detail.playerCards && detail.playerCards.length >= 2) {
     msg += `閒牌: ${fmtHand(detail.playerCards)}\n`;
     msg += `莊牌: ${fmtHand(detail.bankerCards)}\n`;
+  } else if (detail) {
+    const w = detail.winner === 'B' ? '莊贏' : detail.winner === 'P' ? '閒贏' : '和局';
+    msg += `結果: ${w}\n`;
   }
 
-  msg += `━━ EV ━━━━━━\n`;
-  msg += `莊:  ${ev.banker >= 0 ? '+' : ''}${ev.banker.toFixed(4)}\n`;
-  msg += `閒:  ${ev.player >= 0 ? '+' : ''}${ev.player.toFixed(4)}\n`;
-  msg += `超六: ${ev.super6 !== undefined ? ev.super6.toFixed(4) : '-'}\n`;
-  msg += `對子: ${ev.pair !== undefined ? ev.pair.toFixed(4) : '-'}\n`;
-  msg += `和:  ${ev.tie >= 0 ? '+' : ''}${ev.tie.toFixed(4)}`;
+  msg += `—— EV ——\n`;
+  if (ev && typeof ev.banker === 'number') {
+    msg += `莊: ${ev.banker.toFixed(4)}\n`;
+    msg += `閒: ${ev.player.toFixed(4)}\n`;
+    msg += `超六: ${ev.super6 !== undefined ? ev.super6.toFixed(4) : '-'}\n`;
+    msg += `對子: ${ev.pair !== undefined ? ev.pair.toFixed(4) : '-'}\n`;
+    msg += `和: ${ev.tie.toFixed(4)}`;
+  } else {
+    msg += `(等待牌靴資料)`;
+  }
 
   return msg;
 }

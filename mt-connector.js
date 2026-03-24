@@ -1332,8 +1332,8 @@ class MTConnector extends EventEmitter {
       this.emit('tables_list', Array.from(this.tables.values()));
     }
 
-    // 帶牌面的開牌結果
-    if (d.P1 !== undefined || d.Total !== undefined) {
+    // 帶牌面的開牌結果 (P1/P1C/B1C/WF 任一存在)
+    if (d.P1 !== undefined || d.P1C !== undefined || d.WF !== undefined) {
       this._processDDFullResult(tableId, d);
     }
   }
@@ -1341,35 +1341,89 @@ class MTConnector extends EventEmitter {
   // 處理 DD 單局結果
   _processDDRound(tableId, round, summary) {
     if (!round) return;
-    // round 格式: { A: 局號, G: "B"/"P"/"T", P: 點數 }
     const winner = round.G === 'B' ? 'B' : round.G === 'P' ? 'P' : 'T';
+    // 沒有牌面資料，但仍然發出 game_result（讓 EV 計算繼續）
+    this.emit('game_result', {
+      tableId,
+      shoe: null,
+      round: round.A,
+      playerCards: [],
+      bankerCards: [],
+      playerTotal: 0,
+      bankerTotal: 0,
+      winner,
+      playerPair: false,
+      bankerPair: false,
+    });
+  }
 
-    // 記錄但不 emit（因為沒有完整牌面資料）
-    // 只在有完整牌面時才 emit game_result
+  // 解碼 DD 牌面字串: "7D-hash" → { rank:7, suit:'d' } / "KH-..." → { rank:13, suit:'h' }
+  _decodeDDCard(codeStr) {
+    if (!codeStr || typeof codeStr !== 'string') return null;
+    if (codeStr.startsWith('**') || codeStr.startsWith('*')) return null;
+    const dashIdx = codeStr.indexOf('-');
+    const code = dashIdx > 0 ? codeStr.substring(0, dashIdx) : codeStr;
+    if (code.length < 2) return null;
+    const suitChar = code[code.length - 1].toUpperCase();
+    const rankStr = code.substring(0, code.length - 1).toUpperCase();
+    const suitMap = { 'S': 's', 'H': 'h', 'C': 'c', 'D': 'd' };
+    const rankMap = { 'A': 1, 'J': 11, 'Q': 12, 'K': 13 };
+    const suit = suitMap[suitChar];
+    if (!suit) return null;
+    const rank = rankMap[rankStr] || parseInt(rankStr);
+    if (!rank || rank < 1 || rank > 13) return null;
+    return { rank, suit };
   }
 
   // 處理 DD 完整開牌結果（帶 6 張牌面）
   _processDDFullResult(tableId, d) {
-    // 格式: Total, P1-P4(閒), B1-B4(莊), WP(閒點), WB(莊點), W(贏家)
-    // 或: Total, Banker, Player, Tie, List[{A,P1,P2,P3,P4,B1,B2,B3,B4,WB,WP}]
     let playerCards = [];
     let bankerCards = [];
 
-    // 嘗試讀取牌面
+    // 優先使用新格式 P1C/P2C/P3C/B1C/B2C/B3C ("7D-hash" 編碼)
+    if (d.P1C !== undefined || d.B1C !== undefined) {
+      const p1 = this._decodeDDCard(d.P1C);
+      const p2 = this._decodeDDCard(d.P2C);
+      const p3 = this._decodeDDCard(d.P3C);
+      const b1 = this._decodeDDCard(d.B1C);
+      const b2 = this._decodeDDCard(d.B2C);
+      const b3 = this._decodeDDCard(d.B3C);
+      playerCards = [p1, p2, p3].filter(c => c);
+      bankerCards = [b1, b2, b3].filter(c => c);
+
+      if (playerCards.length >= 2 && bankerCards.length >= 2) {
+        const playerTotal = d.PT !== undefined ? d.PT : 0;
+        const bankerTotal = d.BT !== undefined ? d.BT : 0;
+        const winner = d.WF === 'B' ? 'B' : d.WF === 'P' ? 'P' : 'T';
+        const roundNum = d.I || null;
+        const _fmt = c => { const s={s:'♠',h:'♥',c:'♣',d:'♦'},r={1:'A',11:'J',12:'Q',13:'K'}; return `${s[c.suit]||'?'}${r[c.rank]||c.rank}`; };
+        console.log(`🃏 DD開牌: ${tableId} 第${roundNum}局 ` +
+          `閒[${playerCards.map(_fmt).join(' ')}]=${playerTotal} ` +
+          `莊[${bankerCards.map(_fmt).join(' ')}]=${bankerTotal} ` +
+          `→ ${winner === 'B' ? '莊贏' : winner === 'P' ? '閒贏' : '和'}`);
+        this.emit('game_result', {
+          tableId, shoe: null, round: roundNum,
+          playerCards, bankerCards, playerTotal, bankerTotal,
+          winner, playerPair: !!d.PP, bankerPair: !!d.BP,
+        });
+        return;
+      }
+    }
+
+    // 舊格式：P1/P2/P3 為數字
     if (d.P1 !== undefined) {
       [d.P1, d.P2, d.P3].forEach(c => {
         if (c && typeof c === 'object' && c.length === 2) {
-          // 牌面格式可能是 [花色, 點數] 或數字
           playerCards.push(this._parseDDCard(c));
         } else if (typeof c === 'number' && c > 0) {
-          playerCards.push(this.decodeCardNumber(c));
+          playerCards.push({ rank: c % 13 || 13, suit: 's' });
         }
       });
       [d.B1, d.B2, d.B3].forEach(c => {
         if (c && typeof c === 'object' && c.length === 2) {
           bankerCards.push(this._parseDDCard(c));
         } else if (typeof c === 'number' && c > 0) {
-          bankerCards.push(this.decodeCardNumber(c));
+          bankerCards.push({ rank: c % 13 || 13, suit: 's' });
         }
       });
     }
