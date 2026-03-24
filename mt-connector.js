@@ -794,26 +794,30 @@ class MTConnector extends EventEmitter {
 
     if (!tableId) return;
 
-    // 只處理百家樂桌 — gc 開頭 + 6 位數字
-    if (!tableId.match(/^gc\d{6}$/i)) return;
-
     // Summary 訊息 — 包含牌桌統計 + 歷史記錄
     if (d.Summary) {
       const summary = d.Summary;
-      // 從 tableId 提取桌號：gc023002 -> 23-2 號桌
-      const idNum = tableId.replace(/^gc0*/i, '');
-      const tableName = `百家 ${idNum}`;
+
+      // 只收百家樂桌：必須有 Banker 和 Player 欄位（且是數字）
+      if (summary.Banker === undefined || summary.Player === undefined) return;
+      if (typeof summary.Banker !== 'number' || typeof summary.Player !== 'number') return;
+
+      // 桌號命名
+      // C 值是桌號標識，但需要對應到 MT 大廳的編號
+      const tableName = `百家樂 ${tableNum || tableId}`;
+      console.log(`🔍 DD桌 SI=${tableId} C=${tableNum} Summary.Total=${summary.Total} B=${summary.Banker} P=${summary.Player} T=${summary.Tie}`);
 
       // 建立/更新牌桌
       if (!this.tables.has(tableId)) {
         const info = {
           tableId,
           tableName,
+          tableNum: tableNum || 0,
           dealer: { name: '-' },
           shoe: null,
           round: summary.Total || 0,
           state: 'active',
-          hall: tableNum ? `廳${tableNum}` : '',
+          hall: '',
           summary: {
             total: summary.Total || 0,
             banker: summary.Banker || 0,
@@ -835,7 +839,7 @@ class MTConnector extends EventEmitter {
         info.round = summary.Total || 0;
       }
 
-      // 發出牌桌列表更新（只發百家樂桌）
+      // 發出牌桌列表更新
       this.emit('tables_list', Array.from(this.tables.values()));
 
       // 追蹤最新局號，只 emit 新的開牌
