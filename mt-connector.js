@@ -685,9 +685,12 @@ class MTConnector extends EventEmitter {
   }
 
   // ===== DOM 定期讀取（荷官、牌路、統計） =====
+  // 注意: MT 遊戲用 Canvas/WebGL 渲染，DOM 讀不到遊戲內容
+  // 改為從 WS 資料提取荷官資訊
   _startDOMScraper() {
-    if (this._domInterval) return; // 避免重複啟動
-    console.log('🔍 DOM讀取器: 啟動 (每15秒)');
+    if (this._domInterval) return;
+    console.log('🔍 DOM讀取器: 跳過（MT 用 Canvas 渲染，改用 WS 資料）');
+    return; // 暫停 DOM 讀取
 
     // 等10秒讓遊戲頁面完全載入
     setTimeout(() => {
@@ -879,6 +882,20 @@ class MTConnector extends EventEmitter {
 
     // === doubledragon 格式: { D: { Summary: {...}, List: [...] }, C: 301, SI: "gc023002" } ===
     if (msg.D && msg.SI) {
+      // 記錄 D 物件的所有 key（前 20 種不同的 key 組合）
+      if (!this._ddKeyLog) this._ddKeyLog = new Set();
+      const dKeys = Object.keys(msg.D).sort().join(',');
+      if (this._ddKeyLog.size < 20 && !this._ddKeyLog.has(dKeys)) {
+        this._ddKeyLog.add(dKeys);
+        console.log(`📊 DD keys: SI=${msg.SI} keys=[${dKeys}]`);
+        // 如果有未知欄位，輸出完整值
+        const knownKeys = new Set(['Summary','List','R','FA','LA','N','P1','P2','P3','B1','B2','B3','WB','WP','Total','Banker','Player','Tie']);
+        for (const k of Object.keys(msg.D)) {
+          if (!knownKeys.has(k)) {
+            console.log(`📊 DD 未知欄位 ${k}=${JSON.stringify(msg.D[k]).substring(0, 200)}`);
+          }
+        }
+      }
       this._handleDDMessage(msg);
       return;
     }
