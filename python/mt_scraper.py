@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
-MT Baccarat 資料抓取器
-用 Selenium 登入娛樂城 → 進入 MT 遊戲 → 攔截 WebSocket 資料 → 回傳給 Node.js server
+MT Baccarat DOM 抓取器
+Selenium 登入娛樂城 → 進入 MT 遊戲大廳 → 定期讀取 DOM 牌桌資料 → POST 給 Node.js server
+
+抓取資料：牌桌編號、荷官名字、莊閒和統計、牌路歷史
 """
 
 import os
@@ -9,15 +11,18 @@ import sys
 import json
 import time
 import re
-import threading
 import requests
 from dotenv import load_dotenv
-from seleniumwire import webdriver
+from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import (
+    NoSuchElementException, TimeoutException, 
+    StaleElementReferenceException, WebDriverException
+)
 
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
@@ -26,186 +31,150 @@ CASINO_URL = os.getenv('MT_CASINO_URL', 'https://seofufan.seogrwin1688.com/')
 CASINO_USER = os.getenv('MT_CASINO_USERNAME', '')
 CASINO_PASS = os.getenv('MT_CASINO_PASSWORD', '')
 NODE_SERVER = os.getenv('NODE_SERVER_URL', 'http://localhost:3000')
-CHROME_PATH = os.getenv('CHROME_PATH', '')  # 留空自動偵測
+CHROME_PATH = os.getenv('CHROME_PATH', '')
+POLL_INTERVAL = int(os.getenv('POLL_INTERVAL', '8'))  # 秒
 
-# ===== WebSocket 資料收集器 =====
-class WSDataCollector:
-    def __init__(self, server_url):
-        self.server_url = server_url
-        self.tables = {}
-        self.sent_rounds = {}  # tableId -> last round A
-        self.msg_count = 0
+
+# ===== DOM 資料讀取 =====
+SCRAPE_TABLES_JS = """
+(function() {
+    var result = [];
     
-    def process_ws_response(self, url, body):
-        """處理攔截到的 WS response"""
-        if not body:
-            return
-        
-        # 嘗試解析 JSON
-        data_str = body if isinstance(body, str) else body.decode('utf-8', errors='ignore')
-        
-        # SignalR 格式用 \x1e 分隔
-        parts = data_str.split('\x1e') if '\x1e' in data_str else [data_str]
-        
-        for part in parts:
-            part = part.strip()
-            if not part or part == '{}':
-                continue
-            try:
-                msg = json.loads(part)
-                self._handle_message(msg, url)
-            except json.JSONDecodeError:
-                pass
+    // MT 遊戲大廳：每張牌桌是一個卡片區塊
+    // 從截圖觀察，每張桌有：百家樂 N、人數、莊N 閒N 和N、荷官名字
+    // 嘗試多種 DOM 選擇器
     
-    def _handle_message(self, msg, url):
-        """處理單筆訊息"""
-        self.msg_count += 1
-        
-        # doubledragon 格式: {D: {Summary: ...}, C: 301, SI: "gc023002"}
-        if 'D' in msg and 'SI' in msg:
-            self._handle_dd(msg)
-            return
-        
-        # SignalR 格式
-        if msg.get('type') == 1 and 'target' in msg:
-            target = msg['target']
-            if self.msg_count <= 10:
-                print(f"📡 SignalR: {target}")
+    // 策略1：找所有包含「百家樂」+「莊」+「閒」的區塊
+    var allElements = document.querySelectorAll('*');
+    var processed = new Set();
     
-    def _handle_dd(self, msg):
-        """處理 doubledragon 格式"""
-        d = msg['D']
-        table_id = msg['SI']
-        table_num = msg.get('C', 0)
+    for (var i = 0; i < allElements.length; i++) {
+        var el = allElements[i];
+        if (processed.has(el)) continue;
         
-        if 'Summary' not in d:
-            return
+        var text = el.innerText || '';
+        if (text.length < 10 || text.length > 500) continue;
         
-        summary = d['Summary']
+        // 必須同時包含「百家樂」和「莊」和「閒」
+        if (!text.includes('百家樂')) continue;
+        if (!text.includes('莊')) continue;
+        if (!text.includes('閒')) continue;
         
-        # 只收百家樂：必須有數字型 Banker 和 Player
-        banker = summary.get('Banker')
-        player = summary.get('Player')
-        if not isinstance(banker, (int, float)) or not isinstance(player, (int, float)):
-            return
+        // 避免重複（父子元素都匹配）
+        var dominated = false;
+        for (var j = 0; j < result.length; j++) {
+            if (result[j]._el && (result[j]._el.contains(el) || el.contains(result[j]._el))) {
+                // 保留較小的（更精確的）
+                if (el.innerText.length < result[j].rawText.length) {
+                    result[j] = null;  // 標記移除
+                } else {
+                    dominated = true;
+                }
+                break;
+            }
+        }
+        if (dominated) continue;
         
-        total = summary.get('Total', 0)
-        tie = summary.get('Tie', 0)
+        // 提取桌號：「百家樂 N」或「百家樂 B01」
+        var tableMatch = text.match(/百家樂\\s*(\\S+)/);
+        var tableNum = tableMatch ? tableMatch[1] : '?';
         
-        # 更新牌桌
-        is_new = table_id not in self.tables
-        self.tables[table_id] = {
-            'tableId': table_id,
-            'tableNum': table_num,
-            'tableName': f'百家樂 {table_num}' if table_num else table_id,
-            'summary': {
-                'total': total,
-                'banker': int(banker),
-                'player': int(player),
-                'tie': int(tie),
-            },
-            'lastUpdate': time.time()
+        // 提取統計：「莊N 閒N 和N」
+        var statsMatch = text.match(/莊\\s*(\\d+)\\s*(?:.*?)閒\\s*(\\d+)\\s*(?:.*?)和\\s*(\\d+)/);
+        var banker = statsMatch ? parseInt(statsMatch[1]) : 0;
+        var player = statsMatch ? parseInt(statsMatch[2]) : 0;
+        var tie = statsMatch ? parseInt(statsMatch[3]) : 0;
+        
+        // 提取荷官名字（中文或英文名，通常在卡片底部）
+        // 常見格式：「中文 田田」「RANG RANG」「PEI YING」
+        var dealerName = '';
+        var dealerPatterns = [
+            /中文\\s+([\\u4e00-\\u9fff]+)/,           // 中文 田田
+            /([A-Z][A-Z ]{2,20})(?:\\s|$)/,            // RANG RANG
+            /(?:^|\\n)\\s*([\\u4e00-\\u9fff]{2,4})\\s*$/m  // 最後一行中文名
+        ];
+        for (var k = 0; k < dealerPatterns.length; k++) {
+            var dm = text.match(dealerPatterns[k]);
+            if (dm) {
+                dealerName = dm[1].trim();
+                break;
+            }
         }
         
-        if is_new:
-            print(f"📋 新牌桌: 百家樂 {table_num} ({table_id}) 共{total}局 莊{int(banker)} 閒{int(player)} 和{int(tie)}")
+        // 提取人數
+        var playersMatch = text.match(/(\\d+)\\s*人?/);
+        var onlinePlayers = playersMatch ? parseInt(playersMatch[1]) : 0;
         
-        # 檢查新開牌
-        game_list = d.get('List', [])
-        if game_list and isinstance(game_list, list) and len(game_list) > 0:
-            last_round = game_list[-1]
-            last_a = last_round.get('A')
-            prev_a = self.sent_rounds.get(table_id)
-            
-            if last_a and last_a != prev_a:
-                self.sent_rounds[table_id] = last_a
-                winner = last_round.get('G', '?')
-                print(f"🃏 開牌: {table_id} 第{last_a}局 → {'莊' if winner == 'B' else '閒' if winner == 'P' else '和'}")
-                
-                # 回傳給 Node.js
-                self._send_to_node('game_result', {
-                    'tableId': table_id,
-                    'tableNum': table_num,
-                    'round': last_a,
-                    'winner': winner,
-                    'summary': self.tables[table_id]['summary']
-                })
+        // 提取牌路文字（莊莊閒閒和...序列）
+        var roadText = '';
+        var roadMatch = text.match(/([莊閒和]{4,})/g);
+        if (roadMatch) {
+            roadText = roadMatch.join('');
+        }
         
-        # 定期回傳全部牌桌
-        self._send_tables_update()
+        result.push({
+            tableNum: tableNum,
+            banker: banker,
+            player: player,
+            tie: tie,
+            total: banker + player + tie,
+            dealer: dealerName,
+            onlinePlayers: onlinePlayers,
+            roadText: roadText.substring(0, 60),
+            rawText: text.substring(0, 200),
+            _el: el
+        });
+        
+        // 標記已處理
+        processed.add(el);
+    }
     
-    def _send_tables_update(self):
-        """回傳牌桌列表給 Node.js"""
-        if not hasattr(self, '_last_tables_send') or time.time() - self._last_tables_send > 10:
-            self._last_tables_send = time.time()
-            try:
-                resp = requests.post(
-                    f"{self.server_url}/api/mt-data",
-                    json={
-                        'type': 'tables_update',
-                        'tables': list(self.tables.values())
-                    },
-                    timeout=5
-                )
-                if resp.status_code == 200:
-                    pass  # 靜默成功
-                else:
-                    print(f"⚠️ 回傳牌桌失敗: {resp.status_code}")
-            except Exception as e:
-                print(f"⚠️ 回傳失敗: {e}")
+    // 清理 null 和 _el
+    result = result.filter(function(r) { return r !== null; });
+    result.forEach(function(r) { delete r._el; });
     
-    def _send_to_node(self, event_type, data):
-        """回傳事件給 Node.js"""
-        try:
-            resp = requests.post(
-                f"{self.server_url}/api/mt-data",
-                json={'type': event_type, **data},
-                timeout=5
-            )
-        except Exception as e:
-            print(f"⚠️ 回傳失敗: {e}")
+    // 去重：同桌號只保留一個
+    var seen = {};
+    var unique = [];
+    for (var m = 0; m < result.length; m++) {
+        var key = result[m].tableNum + '_' + result[m].banker + '_' + result[m].player;
+        if (!seen[key]) {
+            seen[key] = true;
+            unique.push(result[m]);
+        }
+    }
+    
+    return unique;
+})();
+"""
 
 
 # ===== 主程式 =====
 def create_driver():
     """建立 Chrome driver"""
     chrome_options = Options()
-    
-    # 基本設定
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
     chrome_options.add_argument('--disable-gpu')
-    chrome_options.add_argument('--window-size=1280,800')
+    chrome_options.add_argument('--window-size=1400,900')
     chrome_options.add_argument('--disable-blink-features=AutomationControlled')
     chrome_options.add_experimental_option('excludeSwitches', ['enable-automation'])
     chrome_options.add_experimental_option('useAutomationExtension', False)
-    
-    # 在 Linux 無桌面環境用 headless
+
     if sys.platform == 'linux' and not os.environ.get('DISPLAY'):
         chrome_options.add_argument('--headless=new')
-    
+
     if CHROME_PATH:
         chrome_options.binary_location = CHROME_PATH
-    
-    # selenium-wire 設定（攔截 WS）
-    seleniumwire_options = {
-        'enable_har': False,
-        'ignore_http_methods': ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'],
-    }
-    
-    driver = webdriver.Chrome(
-        options=chrome_options,
-        seleniumwire_options=seleniumwire_options
-    )
-    
-    # 隱藏 webdriver 特徵
+
+    driver = webdriver.Chrome(options=chrome_options)
+
     driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
         'source': '''
             Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
             delete navigator.__proto__.webdriver;
         '''
     })
-    
     return driver
 
 
@@ -214,292 +183,353 @@ def login_casino(driver):
     print(f"🌐 前往 {CASINO_URL}")
     driver.get(CASINO_URL)
     time.sleep(5)
-    
+
     print(f"🔍 頁面: {driver.title} | URL: {driver.current_url}")
-    
-    # 找帳號密碼欄位
+
+    # 找帳號密碼欄位（主頁 + iframe）
     inputs = driver.find_elements(By.TAG_NAME, 'input')
-    print(f"🔍 找到 {len(inputs)} 個 input 欄位")
-    
+    print(f"🔍 主頁 input: {len(inputs)}")
+
+    in_iframe = False
     if len(inputs) == 0:
-        # 檢查 iframe
         iframes = driver.find_elements(By.TAG_NAME, 'iframe')
-        print(f"🔍 找到 {len(iframes)} 個 iframe")
         for iframe in iframes:
             try:
                 driver.switch_to.frame(iframe)
                 inputs = driver.find_elements(By.TAG_NAME, 'input')
                 if len(inputs) > 0:
-                    print(f"🔍 iframe 內找到 {len(inputs)} 個 input")
+                    print(f"🔍 iframe input: {len(inputs)}")
+                    in_iframe = True
                     break
                 driver.switch_to.default_content()
             except:
                 driver.switch_to.default_content()
-    
-    # 等待更久
+
     if len(inputs) == 0:
-        print("⏳ 等待頁面載入...")
+        print("⏳ 等10秒...")
         time.sleep(10)
         inputs = driver.find_elements(By.TAG_NAME, 'input')
-    
-    user_input = None
-    pass_input = None
-    
+
+    user_input = pass_input = None
     for inp in inputs:
-        inp_type = inp.get_attribute('type') or ''
-        inp_name = inp.get_attribute('name') or ''
-        inp_placeholder = inp.get_attribute('placeholder') or ''
-        inp_id = inp.get_attribute('id') or ''
-        
-        if inp_type == 'password' and not pass_input:
+        t = (inp.get_attribute('type') or '').lower()
+        if t == 'password' and not pass_input:
             pass_input = inp
-        elif inp_type in ('text', 'tel', '') and not user_input and inp_type != 'hidden':
+        elif t in ('text', 'tel', '') and not user_input and t != 'hidden':
             user_input = inp
-    
+
     if not user_input or not pass_input:
-        print(f"❌ 找不到帳密欄位 (inputs={len(inputs)})")
-        # 嘗試用 CSS selector
-        try:
-            user_input = driver.find_element(By.CSS_SELECTOR, 'input[type="text"], input[type="tel"], input[name*="user"], input[name*="account"]')
-            pass_input = driver.find_element(By.CSS_SELECTOR, 'input[type="password"]')
-        except:
-            print("❌ CSS selector 也找不到，放棄登入")
-            return False
-    
+        print(f"❌ 找不到帳密欄位")
+        return False
+
     print("🔑 填入帳號密碼...")
     user_input.clear()
     user_input.send_keys(CASINO_USER)
-    time.sleep(0.5)
+    time.sleep(0.3)
     pass_input.clear()
     pass_input.send_keys(CASINO_PASS)
-    time.sleep(0.5)
-    
+    time.sleep(0.3)
+
     # 找登入按鈕
-    buttons = driver.find_elements(By.TAG_NAME, 'button')
     login_btn = None
-    for btn in buttons:
-        text = btn.text.strip()
-        if text in ('登入', '登錄', 'Login', '確定', '提交'):
+    for btn in driver.find_elements(By.TAG_NAME, 'button'):
+        txt = btn.text.strip()
+        if txt in ('登入', '登錄', 'Login', '確定'):
             login_btn = btn
             break
-    
     if not login_btn:
-        # 嘗試 submit
-        submit_btns = driver.find_elements(By.CSS_SELECTOR, 'button[type="submit"], input[type="submit"]')
-        if submit_btns:
-            login_btn = submit_btns[0]
-    
+        subs = driver.find_elements(By.CSS_SELECTOR, 'button[type="submit"], input[type="submit"]')
+        if subs:
+            login_btn = subs[0]
+
     if login_btn:
-        print(f"🖱️ 點擊登入按鈕: {login_btn.text}")
         login_btn.click()
+        print(f"🖱️ 點擊登入: {login_btn.text.strip()}")
     else:
-        print("⚠️ 找不到登入按鈕，嘗試 Enter")
-        pass_input.send_keys('\n')
-    
+        from selenium.webdriver.common.keys import Keys
+        pass_input.send_keys(Keys.RETURN)
+        print("⏎ Enter 登入")
+
     time.sleep(5)
-    print(f"✅ 登入後: {driver.title} | URL: {driver.current_url}")
+    if in_iframe:
+        driver.switch_to.default_content()
+
+    print(f"✅ 登入後: {driver.current_url}")
     return True
 
 
 def close_popups(driver):
     """關閉彈窗"""
-    time.sleep(3)
-    try:
-        # 常見關閉按鈕
-        close_selectors = [
-            '.close', '.modal-close', '[class*="close"]',
-            'button.close', '.popup-close', '.btn-close',
-            '[aria-label="Close"]', '.dialog-close'
-        ]
-        for sel in close_selectors:
-            try:
-                btns = driver.find_elements(By.CSS_SELECTOR, sel)
-                for btn in btns:
-                    if btn.is_displayed():
-                        btn.click()
-                        print(f"🔲 關閉彈窗: {sel}")
-                        time.sleep(1)
-            except:
-                pass
-    except:
-        pass
+    time.sleep(2)
+    for sel in ['.close', '[class*="close"]', '.btn-close', '[aria-label="Close"]']:
+        try:
+            for btn in driver.find_elements(By.CSS_SELECTOR, sel):
+                if btn.is_displayed():
+                    btn.click()
+                    time.sleep(0.5)
+        except:
+            pass
 
 
 def enter_mt_game(driver):
     """進入 MT 真人百家樂"""
-    print("🎰 尋找真人視訊分類...")
-    
-    # 點「真人視訊」
-    try:
-        elements = driver.find_elements(By.XPATH, "//*[contains(text(), '真人視訊') or contains(text(), '真人')]")
-        for el in elements:
-            if el.is_displayed() and len(el.text.strip()) < 20:
-                el.click()
-                print(f"✅ 點擊: {el.text.strip()}")
-                time.sleep(3)
-                break
-    except Exception as e:
-        print(f"⚠️ 找不到真人視訊: {e}")
-    
+    # 點「真人視訊」或「真人」
+    print("🎰 找真人視訊...")
+    for text_to_find in ['真人視訊', '真人']:
+        try:
+            els = driver.find_elements(By.XPATH, f"//*[contains(text(), '{text_to_find}')]")
+            for el in els:
+                if el.is_displayed() and len(el.text.strip()) < 20:
+                    el.click()
+                    print(f"✅ 點: {el.text.strip()}")
+                    time.sleep(3)
+                    break
+        except:
+            pass
+
     # 點「MT真人」
-    print("🎰 尋找 MT真人...")
+    print("🎰 找 MT真人...")
     try:
-        # 找 MT 文字
-        mt_elements = driver.find_elements(By.XPATH, "//*[contains(text(), 'MT真人') or contains(text(), 'MT 真人')]")
-        for el in mt_elements:
-            if el.is_displayed():
-                # 點擊父元素或圖片
-                parent = el.find_element(By.XPATH, '..')
+        for el in driver.find_elements(By.XPATH, "//*[contains(text(), 'MT')]"):
+            if el.is_displayed() and 'MT' in el.text and len(el.text) < 30:
                 try:
-                    img = parent.find_element(By.TAG_NAME, 'img')
-                    img.click()
-                    print("✅ 點擊 MT真人 圖片")
+                    parent = el.find_element(By.XPATH, '..')
+                    imgs = parent.find_elements(By.TAG_NAME, 'img')
+                    if imgs:
+                        imgs[0].click()
+                    else:
+                        parent.click()
                 except:
-                    parent.click()
-                    print("✅ 點擊 MT真人 父元素")
+                    el.click()
+                print(f"✅ 點 MT: {el.text.strip()}")
                 time.sleep(5)
                 return True
-        
-        # 備用：找 MT 相關圖片
-        imgs = driver.find_elements(By.TAG_NAME, 'img')
-        for img in imgs:
-            alt = img.get_attribute('alt') or ''
+    except:
+        pass
+
+    # 備用
+    try:
+        for img in driver.find_elements(By.TAG_NAME, 'img'):
             src = img.get_attribute('src') or ''
-            if 'mt' in alt.lower() or 'mt' in src.lower():
+            if 'mt' in src.lower():
                 img.click()
-                print(f"✅ 點擊 MT 圖片: alt={alt}")
+                print(f"✅ 點 MT 圖: {src[:60]}")
                 time.sleep(5)
                 return True
-                
-    except Exception as e:
-        print(f"⚠️ 找不到 MT真人: {e}")
-    
+    except:
+        pass
+
+    print("⚠️ 找不到 MT真人")
     return False
 
 
-def monitor_ws(driver, collector):
-    """持續監控 WebSocket 資料"""
-    print("📡 開始監控 WebSocket...")
+def switch_to_game_window(driver):
+    """切換到遊戲視窗（MT 通常會開新視窗/iframe）"""
+    handles = driver.window_handles
+    if len(handles) > 1:
+        driver.switch_to.window(handles[-1])
+        print(f"� 切到新視窗: {driver.title} | {driver.current_url}")
+        time.sleep(3)
+        return True
+
+    # 檢查 iframe
+    iframes = driver.find_elements(By.TAG_NAME, 'iframe')
+    for iframe in iframes:
+        src = iframe.get_attribute('src') or ''
+        if 'game' in src.lower() or 'mt' in src.lower() or 'rbjork' in src.lower():
+            driver.switch_to.frame(iframe)
+            print(f"🔀 切到 iframe: {src[:80]}")
+            time.sleep(3)
+            return True
+
+    print("ℹ️ 維持當前視窗")
+    return False
+
+
+def scrape_tables(driver):
+    """從 DOM 讀取所有百家樂桌資料"""
+    try:
+        tables = driver.execute_script(SCRAPE_TABLES_JS)
+        return tables or []
+    except Exception as e:
+        print(f"⚠️ DOM 讀取失敗: {e}")
+        return []
+
+
+def send_to_node(data):
+    """POST 資料給 Node.js"""
+    try:
+        resp = requests.post(f"{NODE_SERVER}/api/mt-data", json=data, timeout=5)
+        return resp.status_code == 200
+    except Exception as e:
+        print(f"⚠️ POST 失敗: {e}")
+        return False
+
+
+def monitor_loop(driver):
+    """主監控迴圈：定期讀取 DOM + 偵測新開牌"""
+    print(f"🔄 開始監控 (每 {POLL_INTERVAL} 秒)")
     
-    # 用 CDP 監控 WS
-    # selenium-wire 主要攔截 HTTP，WS 需要用 CDP
+    prev_tables = {}  # tableNum -> {banker, player, tie}
+    cycle = 0
     
-    # 取得 CDP session
-    ws_data = {'connected': False}
-    
-    def ws_listener():
-        """在背景執行 CDP WS 監控"""
-        try:
-            # 透過 Chrome DevTools Protocol 監控 WS
-            driver.execute_cdp_cmd('Network.enable', {})
-            print("✅ CDP Network 已啟用")
-        except Exception as e:
-            print(f"⚠️ CDP 啟用失敗: {e}")
-    
-    ws_listener()
-    
-    # 主迴圈：定期檢查頁面上的資料
-    print("🔄 開始定期抓取頁面資料...")
     while True:
         try:
-            # 方法1: 從頁面 DOM 直接讀取牌桌資料
-            tables_data = driver.execute_script("""
-                var tables = [];
-                // 找所有百家樂桌的容器
-                var cards = document.querySelectorAll('[class*="table"], [class*="game"], [class*="card"], [class*="room"]');
-                cards.forEach(function(card) {
-                    var text = card.innerText || '';
-                    if (text.includes('百家樂') || text.includes('莊') || text.includes('閒')) {
-                        // 提取統計數據
-                        var match = text.match(/莊(\\d+).*?閒(\\d+).*?和(\\d+)/);
-                        if (match) {
-                            tables.push({
-                                text: text.substring(0, 100),
-                                banker: parseInt(match[1]),
-                                player: parseInt(match[2]),
-                                tie: parseInt(match[3])
-                            });
-                        }
+            cycle += 1
+            tables = scrape_tables(driver)
+            
+            if not tables:
+                if cycle <= 3:
+                    print(f"⏳ 第{cycle}次掃描，未找到牌桌...")
+                    # 嘗試找「百家樂」分頁
+                    try:
+                        for el in driver.find_elements(By.XPATH, "//*[text()='百家樂']"):
+                            if el.is_displayed():
+                                el.click()
+                                print("✅ 點「百家樂」分頁")
+                                time.sleep(2)
+                                break
+                    except:
+                        pass
+                time.sleep(POLL_INTERVAL)
+                continue
+            
+            # 偵測新開牌
+            new_results = []
+            for t in tables:
+                num = t['tableNum']
+                prev = prev_tables.get(num)
+                if prev:
+                    # 比較統計數字變化
+                    new_total = t['banker'] + t['player'] + t['tie']
+                    old_total = prev['banker'] + prev['player'] + prev['tie']
+                    if new_total > old_total:
+                        # 有新局！判斷誰贏
+                        if t['banker'] > prev['banker']:
+                            winner = 'B'
+                        elif t['player'] > prev['player']:
+                            winner = 'P'
+                        else:
+                            winner = 'T'
+                        new_results.append({
+                            'tableNum': num,
+                            'winner': winner,
+                            'banker': t['banker'],
+                            'player': t['player'],
+                            'tie': t['tie'],
+                            'dealer': t.get('dealer', ''),
+                        })
+                        print(f"🃏 新開牌: 百家樂{num} → {'莊' if winner == 'B' else '閒' if winner == 'P' else '和'} "
+                              f"(莊{t['banker']} 閒{t['player']} 和{t['tie']})")
+                
+                prev_tables[num] = {
+                    'banker': t['banker'],
+                    'player': t['player'],
+                    'tie': t['tie'],
+                }
+            
+            # 回傳牌桌列表（每次都傳，保持最新）
+            formatted = []
+            for t in tables:
+                formatted.append({
+                    'tableId': f"mt_{t['tableNum']}",
+                    'tableNum': t['tableNum'],
+                    'tableName': f"百家樂 {t['tableNum']}",
+                    'dealer': t.get('dealer', ''),
+                    'summary': {
+                        'total': t['banker'] + t['player'] + t['tie'],
+                        'banker': t['banker'],
+                        'player': t['player'],
+                        'tie': t['tie'],
+                    },
+                    'onlinePlayers': t.get('onlinePlayers', 0),
+                    'roadText': t.get('roadText', ''),
+                })
+            
+            send_to_node({'type': 'tables_update', 'tables': formatted})
+            
+            # 回傳新開牌
+            for nr in new_results:
+                send_to_node({
+                    'type': 'game_result',
+                    'tableId': f"mt_{nr['tableNum']}",
+                    'tableNum': nr['tableNum'],
+                    'winner': nr['winner'],
+                    'summary': {
+                        'total': nr['banker'] + nr['player'] + nr['tie'],
+                        'banker': nr['banker'],
+                        'player': nr['player'],
+                        'tie': nr['tie'],
                     }
-                });
-                return tables;
-            """)
+                })
             
-            if tables_data and len(tables_data) > 0:
-                print(f"📋 DOM 抓到 {len(tables_data)} 張牌桌")
-                # 回傳給 Node.js
-                try:
-                    requests.post(
-                        f"{NODE_SERVER}/api/mt-data",
-                        json={'type': 'dom_tables', 'tables': tables_data},
-                        timeout=5
-                    )
-                except:
-                    pass
+            if cycle % 10 == 1:
+                print(f"📋 掃描 #{cycle}: {len(tables)} 張桌 | "
+                      f"{len(new_results)} 新開牌 | "
+                      f"桌: {', '.join(t['tableNum'] for t in tables[:5])}...")
             
-            # 方法2: 攔截 selenium-wire 的請求
-            for request in driver.requests:
-                if request.response and ('doubledragon' in request.url or 'rbjork' in request.url):
-                    if request.response.body:
-                        collector.process_ws_response(request.url, request.response.body)
-            
-            # 清理已處理的請求
-            del driver.requests
-            
-            time.sleep(5)
+            time.sleep(POLL_INTERVAL)
             
         except KeyboardInterrupt:
-            print("\n🛑 停止監控")
+            print("\n🛑 停止")
             break
-        except Exception as e:
-            print(f"⚠️ 監控錯誤: {e}")
+        except StaleElementReferenceException:
+            print("⚠️ 頁面更新中，重試...")
+            time.sleep(2)
+        except WebDriverException as e:
+            print(f"⚠️ 瀏覽器錯誤: {e}")
             time.sleep(10)
+        except Exception as e:
+            print(f"⚠️ 錯誤: {e}")
+            time.sleep(POLL_INTERVAL)
 
 
 def main():
     if not CASINO_USER or not CASINO_PASS:
-        print("❌ 請設定 MT_CASINO_USERNAME 和 MT_CASINO_PASSWORD")
+        print("❌ 請在 .env 設定 MT_CASINO_USERNAME 和 MT_CASINO_PASSWORD")
         sys.exit(1)
-    
-    print("🎰 MT Baccarat Python 抓取器 啟動")
-    print(f"📡 Node.js server: {NODE_SERVER}")
+
+    print("═" * 50)
+    print("🎰 MT Baccarat DOM 抓取器")
+    print(f"📡 Node.js: {NODE_SERVER}")
     print(f"🌐 娛樂城: {CASINO_URL}")
-    
-    collector = WSDataCollector(NODE_SERVER)
+    print(f"⏱️ 掃描間隔: {POLL_INTERVAL}秒")
+    print("═" * 50)
+
     driver = None
-    
     try:
         driver = create_driver()
-        print("✅ Chrome 已啟動")
-        
-        # 1. 登入
+        print("✅ Chrome 啟動")
+
         if not login_casino(driver):
-            print("❌ 登入失敗")
+            print("❌ 登入失敗，退出")
             return
-        
-        # 2. 關閉彈窗
+
         close_popups(driver)
-        
-        # 3. 進入 MT 遊戲
         enter_mt_game(driver)
-        
-        # 4. 等待遊戲載入
+
         print("⏳ 等待遊戲載入...")
-        time.sleep(10)
-        
-        # 5. 檢查是否有新視窗
-        handles = driver.window_handles
-        if len(handles) > 1:
-            driver.switch_to.window(handles[-1])
-            print(f"🔀 切換到新視窗: {driver.title}")
-        
-        # 6. 開始監控
-        monitor_ws(driver, collector)
-        
+        time.sleep(8)
+
+        switch_to_game_window(driver)
+
+        # 點「百家樂」分頁（如果有）
+        try:
+            for el in driver.find_elements(By.XPATH, "//*[text()='百家樂']"):
+                if el.is_displayed():
+                    el.click()
+                    print("✅ 點「百家樂」分頁")
+                    time.sleep(2)
+                    break
+        except:
+            pass
+
+        monitor_loop(driver)
+
     except KeyboardInterrupt:
         print("\n🛑 收到停止信號")
     except Exception as e:
-        print(f"❌ 錯誤: {e}")
+        print(f"❌ 致命錯誤: {e}")
         import traceback
         traceback.print_exc()
     finally:

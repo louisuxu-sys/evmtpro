@@ -277,7 +277,7 @@ function fmtHand(cards) {
 function getRoomList() {
   if (tables.size === 0) return '⏳ 正在連線 MT 平台，請稍候...';
 
-  let text = `🎰 百家之眼 - 百家樂房間\n━━━━━━━━━━━━━━━━\n`;
+  let text = `🎰 百家之眼 - MT百家樂\n━━━━━━━━━━━━━━━━\n`;
   let count = 0;
   for (const [id, engine] of tables) {
     count++;
@@ -285,23 +285,24 @@ function getRoomList() {
       text += `\n... 還有 ${tables.size - 20} 個房間`;
       break;
     }
-    const name = engine.tableName || `第${id}廳`;
-    const hands = engine.handCount || 0;
-    const state = engine.getState();
-    // 顯示統計（如果有）
+    const name = engine.tableName || `百家樂 ${id}`;
     const mtId = localToMtMap.get(id);
     const mtInfo = mtId ? mtConnector.tables.get(mtId) : null;
     const summary = mtInfo?.summary;
+    const dealer = engine.dealer || mtInfo?.dealer || '-';
+    const road = mtInfo?.roadText || '';
+
+    let line = `\n${id}. ${name}`;
+    if (dealer && dealer !== '-') line += ` | ${dealer}`;
     if (summary && summary.total > 0) {
-      text += `\n${id}. ${name} | ${summary.total}局 莊${summary.banker} 閒${summary.player} 和${summary.tie}`;
-    } else {
-      text += `\n${id}. ${name} | ${hands}局`;
+      line += `\n   莊${summary.banker} 閒${summary.player} 和${summary.tie} (共${summary.total}局)`;
     }
+    if (road) line += `\n   ${road.substring(0, 30)}`;
+    text += line;
   }
   text += `\n\n━━━━━━━━━━━━━━━━\n`;
-  text += `共 ${tables.size} 個房間\n`;
-  text += `輸入數字跟隨房間，如: 3\n`;
-  text += `跟隨後自動推送每手牌型及EV`;
+  text += `共 ${tables.size} 個百家樂桌\n`;
+  text += `輸入數字跟隨，如: 3`;
   return text;
 }
 
@@ -344,15 +345,16 @@ app.post('/api/mt-data', (req, res) => {
         const localId = tables.size + 1;
         const engine = new BaccaratEngine(localId, t.tableName || `MT-${tableId}`);
         engine._mtTableId = tableId;
+        if (t.dealer) engine.setDealer(t.dealer);
         tables.set(localId, engine);
         mtTableIdMap.set(tableId, localId);
         localToMtMap.set(localId, tableId);
-        // 儲存 summary 到 mtConnector.tables
         mtConnector.tables.set(tableId, t);
-        console.log(`  ✅ 第${localId}廳: ${t.tableName} (Python)`);
+        console.log(`  ✅ 第${localId}廳: ${t.tableName} | 荷官: ${t.dealer || '-'} (Python)`);
       } else {
-        // 更新
         const localId = mtTableIdMap.get(tableId);
+        const engine = tables.get(localId);
+        if (engine && t.dealer) engine.setDealer(t.dealer);
         mtConnector.tables.set(tableId, t);
       }
     }
