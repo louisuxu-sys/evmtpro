@@ -963,23 +963,24 @@ class MTConnector extends EventEmitter {
       if (summary.Banker === undefined || summary.Player === undefined) return;
       if (typeof summary.Banker !== 'number' || typeof summary.Player !== 'number') return;
 
-      // 只收 gc + 5~6 位數字 的百家樂桌 (排除 GCBC、純數字長編號等)
-      // 有效: gc011012, gc023002, gc020001, gc011015
-      // 排除: GCBC20201106, 2012160125, 2201050144
-      if (!/^gc\d{5,6}$/i.test(tableId)) return;
+      // 只收百家樂格式的桌（Summary 有 Banker+Player+Tie）
+      // 排除龍虎、骰寶、牛牛等（它們的 Summary 有 Dragon/Tiger/D1/DP 等）
+      if (summary.Tie === undefined) return;
 
-      // 從 SI 提取桌號：gc011012 → 取後3~4位得到實際桌號
-      // gc011012: 011=系列 012=桌號? 或者最後3位 012
-      // gc023002: 023=系列 002=桌號?
-      // 直接用完整 SI 作為唯一標識，在 DOM 讀取時再匹配正確桌號
-      const tableName = `百家樂 ${tableId}`;
-      console.log(`🔍 DD桌 SI=${tableId} C=${tableNum} Total=${summary.Total} B=${summary.Banker} P=${summary.Player} T=${summary.Tie}`);
-
+      // 自動編號：百家樂 1, 2, 3...
+      if (!this._tableOrder) this._tableOrder = [];
+      if (!this._tableOrder.includes(tableId)) {
+        this._tableOrder.push(tableId);
+      }
+      const displayNum = this._tableOrder.indexOf(tableId) + 1;
+      const tableName = `百家樂 ${displayNum}`;
+      
       // 建立/更新牌桌
       if (!this.tables.has(tableId)) {
         const info = {
           tableId,
           tableName,
+          displayNum,
           tableNum: tableNum || 0,
           dealer: { name: '-' },
           shoe: null,
@@ -994,7 +995,7 @@ class MTConnector extends EventEmitter {
           }
         };
         this.tables.set(tableId, info);
-        console.log(`📋 DD: 新牌桌 ${tableName} (${tableId}) 共${summary.Total}局 莊${summary.Banker} 閒${summary.Player} 和${summary.Tie}`);
+        console.log(`📋 #${displayNum} ${tableName} (${tableId}) 共${summary.Total}局 莊${summary.Banker} 閒${summary.Player} 和${summary.Tie}`);
       } else {
         // 更新統計
         const info = this.tables.get(tableId);
@@ -1007,11 +1008,19 @@ class MTConnector extends EventEmitter {
         info.round = summary.Total || 0;
       }
 
-      // 發出牌桌列表更新
-      this.emit('tables_list', Array.from(this.tables.values()));
-
-      // 追蹤最新局號，只 emit 新的開牌
+      // 從 List 建立牌路
       if (d.List && Array.isArray(d.List) && d.List.length > 0) {
+        const info = this.tables.get(tableId);
+        // 建牌路文字：最後 30 局
+        const recent = d.List.slice(-30);
+        const roadText = recent.map(r => {
+          if (r.G === 'B') return '莊';
+          if (r.G === 'P') return '閒';
+          return '和';
+        }).join('');
+        if (info) info.roadText = roadText;
+
+        // 追蹤最新局號，只 emit 新的開牌
         const lastRound = d.List[d.List.length - 1];
         if (!this._lastRound) this._lastRound = {};
         const lastA = this._lastRound[tableId];
@@ -1020,6 +1029,9 @@ class MTConnector extends EventEmitter {
           this._processDDRound(tableId, lastRound, summary);
         }
       }
+
+      // 發出牌桌列表更新
+      this.emit('tables_list', Array.from(this.tables.values()));
     }
 
     // 帶牌面的開牌結果
