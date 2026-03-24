@@ -338,8 +338,10 @@ function formatHandResult(localId, engine, ev, detail) {
   const shoe = state.shoeNum || '-';
   const hand = detail?.hand || state.handCount || '-';
   const dealer = state.dealer || '-';
+  // 用 MT 真實房名 (如 "百家樂 2") 而非序號
+  const roomLabel = state.tableName || `百家樂 ${localId}`;
 
-  let msg = `第${localId}廳 | 靴 ${shoe} 第${hand}手\n`;
+  let msg = `${roomLabel} | 靴 ${shoe} 第${hand}手\n`;
   msg += `荷官: ${dealer}\n`;
 
   if (detail && detail.playerCards && detail.playerCards.length >= 2) {

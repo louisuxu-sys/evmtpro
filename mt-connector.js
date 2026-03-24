@@ -1279,11 +1279,20 @@ class MTConnector extends EventEmitter {
 
       // 去重：同一房號已存在則跳過（不建立新紀錄）
       if (!this._roomNumMap) this._roomNumMap = new Map();
-      if (roomNum && !this.tables.has(tableId)) {
-        if (this._roomNumMap.has(roomNum)) {
-          return; // 此房號已有另一個 ID 代表，跳過
+      if (!this.tables.has(tableId)) {
+        if (roomNum) {
+          // gc 房號去重
+          if (this._roomNumMap.has(roomNum)) return;
+          this._roomNumMap.set(roomNum, tableId);
+        } else {
+          // 非 gc：以前 8 碼去重，並限制最多 6 個
+          const key8 = tableId.substring(0, 8);
+          if (this._roomNumMap.has('ng_' + key8)) return;
+          if (!this._nonGcCount) this._nonGcCount = 0;
+          if (this._nonGcCount >= 6) return;
+          this._roomNumMap.set('ng_' + key8, tableId);
+          this._nonGcCount++;
         }
-        this._roomNumMap.set(roomNum, tableId);
       }
 
       // 房間名稱：gc ID 用真實房號，非 gc 用 B 序號
@@ -1292,9 +1301,8 @@ class MTConnector extends EventEmitter {
         displayNum = roomNum;
         tableName = `百家樂 ${roomNum}`;
       } else {
-        if (!this._nonGcCount) this._nonGcCount = 0;
-        this._nonGcCount++;
-        displayNum = `B${String(this._nonGcCount).padStart(2, '0')}`;
+        const bNum = this._nonGcCount || 1;
+        displayNum = `B${String(bNum).padStart(2, '0')}`;
         tableName = `百家樂 ${displayNum}`;
       }
 
@@ -1351,13 +1359,18 @@ class MTConnector extends EventEmitter {
         }).join('');
         if (info) info.roadText = roadText;
 
-        // 追蹤最新局號，只 emit 新的開牌
+        // 追蹤最新局號
         const lastRound = d.List[d.List.length - 1];
         if (!this._lastRound) this._lastRound = {};
         const lastA = this._lastRound[tableId];
         if (lastRound.A && lastRound.A !== lastA) {
           this._lastRound[tableId] = lastRound.A;
-          this._processDDRound(tableId, lastRound, summary);
+          // 只在沒有實際牌碼時才由 List 觸發（避免與下方 FullResult 重複發送）
+          const hasRealCardNow = (d.P1C && typeof d.P1C === 'string' && !d.P1C.startsWith('**')) ||
+                                 (d.B1C && typeof d.B1C === 'string' && !d.B1C.startsWith('**'));
+          if (!hasRealCardNow && d.P1 === undefined) {
+            this._processDDRound(tableId, lastRound, summary);
+          }
         }
       }
 
@@ -1365,8 +1378,10 @@ class MTConnector extends EventEmitter {
       this.emit('tables_list', Array.from(this.tables.values()));
     }
 
-    // 帶牌面的開牌結果 (P1/P1C/B1C/WF 任一存在)
-    if (d.P1 !== undefined || d.P1C !== undefined || d.WF !== undefined) {
+    // 帶牌面的開牌結果 — 只在有實際牌碼（未遮蔽）時才處理
+    const hasRealCard = (d.P1C && typeof d.P1C === 'string' && !d.P1C.startsWith('**')) ||
+                        (d.B1C && typeof d.B1C === 'string' && !d.B1C.startsWith('**'));
+    if (hasRealCard || d.P1 !== undefined) {
       this._processDDFullResult(tableId, d);
     }
   }
@@ -1425,10 +1440,12 @@ class MTConnector extends EventEmitter {
       bankerCards = [b1, b2, b3].filter(c => c);
 
       if (playerCards.length >= 2 && bankerCards.length >= 2) {
-        const playerTotal = d.PT !== undefined ? d.PT : 0;
-        const bankerTotal = d.BT !== undefined ? d.BT : 0;
+        // 百家樂點數: A=1, 2-9=面值, 10/J/Q/K=0
+        const bacVal = r => (r >= 10 ? 0 : r);
+        const playerTotal = playerCards.reduce((s, c) => (s + bacVal(c.rank)) % 10, 0);
+        const bankerTotal = bankerCards.reduce((s, c) => (s + bacVal(c.rank)) % 10, 0);
         const winner = d.WF === 'B' ? 'B' : d.WF === 'P' ? 'P' : 'T';
-        const roundNum = d.I || null;
+        const roundNum = d.A || d.I || null;
         const _fmt = c => { const s={s:'♠',h:'♥',c:'♣',d:'♦'},r={1:'A',11:'J',12:'Q',13:'K'}; return `${s[c.suit]||'?'}${r[c.rank]||c.rank}`; };
         console.log(`🃏 DD開牌: ${tableId} 第${roundNum}局 ` +
           `閒[${playerCards.map(_fmt).join(' ')}]=${playerTotal} ` +
