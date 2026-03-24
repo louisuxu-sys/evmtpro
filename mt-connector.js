@@ -1245,11 +1245,23 @@ class MTConnector extends EventEmitter {
     }
   }
 
+  // 從 gc 格式 tableId 提取真實房號: gc023002→"2", gc011012→"12", gc011031→"B01"
+  _extractRoomNum(tableId) {
+    const m = tableId.match(/^gc\d{3}(\d{3})$/i);
+    if (m) {
+      const n = parseInt(m[1]);
+      if (n >= 1 && n <= 20) return String(n);
+      const bMap = { 31: 'B01', 32: 'B02', 33: 'B03', 34: 'B03A', 35: 'B05' };
+      if (bMap[n]) return bMap[n];
+    }
+    return null;
+  }
+
   // ===== doubledragon 格式處理 =====
   _handleDDMessage(msg) {
     const d = msg.D;
     const tableId = msg.SI; // e.g. "gc023002"
-    const tableNum = msg.C; // e.g. 301
+    const channelNum = msg.C; // 頻道號碼
 
     if (!tableId) return;
 
@@ -1260,26 +1272,47 @@ class MTConnector extends EventEmitter {
       // 只收百家樂桌：必須有 Banker 和 Player 欄位（且是數字）
       if (summary.Banker === undefined || summary.Player === undefined) return;
       if (typeof summary.Banker !== 'number' || typeof summary.Player !== 'number') return;
-
-      // 只收百家樂格式的桌（Summary 有 Banker+Player+Tie）
-      // 排除龍虎、骰寶、牛牛等（它們的 Summary 有 Dragon/Tiger/D1/DP 等）
       if (summary.Tie === undefined) return;
 
-      // 自動編號：百家樂 1, 2, 3...
-      if (!this._tableOrder) this._tableOrder = [];
-      if (!this._tableOrder.includes(tableId)) {
-        this._tableOrder.push(tableId);
+      // 提取真實房號
+      const roomNum = this._extractRoomNum(tableId);
+
+      // 去重：同一房號已存在則跳過（不建立新紀錄）
+      if (!this._roomNumMap) this._roomNumMap = new Map();
+      if (roomNum && !this.tables.has(tableId)) {
+        if (this._roomNumMap.has(roomNum)) {
+          return; // 此房號已有另一個 ID 代表，跳過
+        }
+        this._roomNumMap.set(roomNum, tableId);
       }
-      const displayNum = this._tableOrder.indexOf(tableId) + 1;
-      const tableName = `百家樂 ${displayNum}`;
-      
+
+      // 房間名稱：gc ID 用真實房號，非 gc 用 B 序號
+      let displayNum, tableName;
+      if (roomNum) {
+        displayNum = roomNum;
+        tableName = `百家樂 ${roomNum}`;
+      } else {
+        if (!this._nonGcCount) this._nonGcCount = 0;
+        this._nonGcCount++;
+        displayNum = `B${String(this._nonGcCount).padStart(2, '0')}`;
+        tableName = `百家樂 ${displayNum}`;
+      }
+
+      // 記錄頻道號碼對應（前30條）
+      if (!this._channelLog) this._channelLog = new Set();
+      const cKey = `${tableId}|C${channelNum}`;
+      if (!this._channelLog.has(cKey) && this._channelLog.size < 30) {
+        this._channelLog.add(cKey);
+        console.log(`🏠 房號: ${displayNum} ← ${tableId} C=${channelNum}`);
+      }
+
       // 建立/更新牌桌
       if (!this.tables.has(tableId)) {
         const info = {
           tableId,
           tableName,
           displayNum,
-          tableNum: tableNum || 0,
+          tableNum: channelNum || 0,
           dealer: { name: '-' },
           shoe: null,
           round: summary.Total || 0,
@@ -1293,7 +1326,7 @@ class MTConnector extends EventEmitter {
           }
         };
         this.tables.set(tableId, info);
-        console.log(`📋 #${displayNum} ${tableName} (${tableId}) 共${summary.Total}局 莊${summary.Banker} 閒${summary.Player} 和${summary.Tie}`);
+        console.log(`📋 房間 ${displayNum} (${tableId}) 共${summary.Total}局 莊${summary.Banker} 閒${summary.Player} 和${summary.Tie}`);
       } else {
         // 更新統計
         const info = this.tables.get(tableId);
