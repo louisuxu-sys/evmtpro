@@ -749,67 +749,143 @@ class MTConnector extends EventEmitter {
     }
   }
 
-  // 啟動 Canvas 文字收集器（定期從遊戲頁面讀取攔截到的文字）
+  // 啟動頁面診斷 + 截圖（找荷官名字）
   _startCanvasCollector() {
     if (this._canvasInterval) return;
-    console.log('🎨 Canvas收集器: 啟動 (每20秒)');
+    console.log('🔍 頁面診斷器: 啟動 (15秒後開始)');
 
-    // 等15秒讓遊戲完全載入
-    setTimeout(() => {
-      this._canvasInterval = setInterval(() => this._collectCanvasTexts(), 20000);
-      this._collectCanvasTexts(); // 立即執行一次
+    setTimeout(async () => {
+      await this._diagnoseGamePage();
+      // 之後每30秒檢查一次
+      this._canvasInterval = setInterval(() => this._diagnoseGamePage(), 30000);
     }, 15000);
   }
 
-  async _collectCanvasTexts() {
-    if (!this.page) return;
+  async _diagnoseGamePage() {
     try {
-      // 找到遊戲頁面
       const pages = await this.browser.pages();
       let gamePage = null;
       for (const p of pages) {
         const url = await p.url().catch(() => '');
-        if (url.includes('ofalive') || url.includes('rbjork') || url.includes('game')) {
+        if (url.includes('ofalive') || url.includes('rbjork') || url.includes('game') || url.includes('dd.')) {
           gamePage = p;
           break;
         }
       }
       if (!gamePage) gamePage = this.page;
 
-      // 讀取攔截到的文字
-      const result = await gamePage.evaluate(() => {
-        if (!window.__canvasTexts) return { texts: [], count: 0 };
-        var now = Date.now();
-        // 只取最近 30 秒內的文字
-        var recent = window.__canvasTexts.filter(function(t) {
-          return now - t.ts < 30000;
-        });
-        return {
-          texts: recent,
-          count: window.__canvasTextCount || 0
+      if (!this._diagCount) this._diagCount = 0;
+      this._diagCount++;
+
+      const diag = await gamePage.evaluate(() => {
+        var result = {
+          url: location.href,
+          title: document.title,
+          canvasCount: document.querySelectorAll('canvas').length,
+          iframeCount: document.querySelectorAll('iframe').length,
+          divCount: document.querySelectorAll('div').length,
+          textContent: '',
+          iframes: [],
+          allText: []
         };
+
+        // 取得所有可見文字
+        var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+        var texts = [];
+        while (walker.nextNode()) {
+          var t = walker.currentNode.textContent.trim();
+          if (t && t.length > 0 && t.length < 50) texts.push(t);
+        }
+        result.allText = texts.slice(0, 100);
+        result.textContent = texts.join(' ').substring(0, 500);
+
+        // iframe 資訊
+        document.querySelectorAll('iframe').forEach(function(f, i) {
+          result.iframes.push({
+            src: (f.src || '').substring(0, 100),
+            w: f.offsetWidth,
+            h: f.offsetHeight
+          });
+        });
+
+        // Canvas 資訊
+        result.canvasInfo = [];
+        document.querySelectorAll('canvas').forEach(function(c, i) {
+          result.canvasInfo.push({
+            w: c.width, h: c.height,
+            style: c.style.cssText.substring(0, 50),
+            hasWebGL: !!(c.getContext('webgl') || c.getContext('webgl2'))
+          });
+        });
+
+        return result;
       });
 
-      if (!this._canvasLogCount) this._canvasLogCount = 0;
-      this._canvasLogCount++;
-
-      if (result.texts.length > 0) {
-        // 分析文字，找荷官名字
-        this._analyzeCanvasTexts(result.texts);
-
-        // 前5次或每10次輸出完整日誌
-        if (this._canvasLogCount <= 5 || this._canvasLogCount % 10 === 0) {
-          // 取不重複的文字列表
-          const unique = [...new Set(result.texts.map(t => t.t))];
-          console.log(`🎨 Canvas文字: ${result.texts.length}條(共${result.count}) | ${unique.slice(0, 20).join(', ')}`);
+      // 前3次輸出完整診斷
+      if (this._diagCount <= 3) {
+        console.log(`🔍 遊戲頁面診斷 #${this._diagCount}:`);
+        console.log(`   URL: ${diag.url}`);
+        console.log(`   Canvas: ${diag.canvasCount} | iframe: ${diag.iframeCount} | div: ${diag.divCount}`);
+        if (diag.canvasInfo.length > 0) {
+          diag.canvasInfo.forEach((c, i) => console.log(`   Canvas[${i}]: ${c.w}x${c.h} WebGL=${c.hasWebGL}`));
         }
-      } else {
-        if (this._canvasLogCount <= 3) {
-          console.log(`🎨 Canvas文字: 無 (hook 可能未生效或遊戲未載入)`);
+        if (diag.iframes.length > 0) {
+          diag.iframes.forEach((f, i) => console.log(`   iframe[${i}]: ${f.src} (${f.w}x${f.h})`));
+        }
+        // 顯示頁面上的所有文字
+        if (diag.allText.length > 0) {
+          console.log(`   文字(${diag.allText.length}): ${diag.allText.slice(0, 30).join(', ')}`);
+        } else {
+          console.log(`   頁面無可見文字`);
         }
       }
+
+      // 嘗試進入 iframe 讀取文字
+      if (diag.iframeCount > 0) {
+        for (const frame of gamePage.frames()) {
+          const fUrl = frame.url();
+          if (!fUrl || fUrl === 'about:blank') continue;
+          try {
+            const frameTexts = await frame.evaluate(() => {
+              var texts = [];
+              var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+              while (walker.nextNode()) {
+                var t = walker.currentNode.textContent.trim();
+                if (t && t.length > 1 && t.length < 50) texts.push(t);
+              }
+              return texts.slice(0, 50);
+            });
+            if (frameTexts.length > 0 && this._diagCount <= 3) {
+              console.log(`   iframe文字(${fUrl.substring(0, 50)}): ${frameTexts.slice(0, 20).join(', ')}`);
+            }
+
+            // 在 iframe 裡找荷官名字
+            const dealers = frameTexts.filter(t => {
+              if (/^[\u4e00-\u9fff]{2,4}$/.test(t)) return true;
+              if (/^[A-Z][a-zA-Z]{1,14}$/.test(t)) return true;
+              return false;
+            });
+            if (dealers.length > 0 && this._diagCount <= 5) {
+              console.log(`   👩 iframe荷官候選: ${dealers.join(', ')}`);
+            }
+          } catch (e) {
+            // iframe 可能 cross-origin
+          }
+        }
+      }
+
+      // 截圖（只截第一次）
+      if (this._diagCount === 1) {
+        try {
+          await gamePage.screenshot({ path: '/tmp/mt_game_page.png', fullPage: false });
+          console.log('📸 遊戲頁面截圖: /tmp/mt_game_page.png');
+        } catch (e) {}
+      }
+
     } catch (e) {
-      // 靜默
+      if (this._diagCount <= 2) {
+        console.log(`⚠️ 頁面診斷錯誤: ${e.message}`);
+      }
     }
   }
 
