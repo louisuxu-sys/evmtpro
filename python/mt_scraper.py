@@ -178,73 +178,177 @@ def create_driver():
     return driver
 
 
+def find_inputs_in_all_frames(driver):
+    """在主頁面和所有 iframe/shadow DOM 中搜尋 input 欄位"""
+    # 1. 主頁面
+    inputs = driver.find_elements(By.TAG_NAME, 'input')
+    visible = [i for i in inputs if i.is_displayed()]
+    if visible:
+        return visible, False
+
+    # 2. 所有 iframe（遞迴）
+    iframes = driver.find_elements(By.TAG_NAME, 'iframe')
+    print(f"🔍 找到 {len(iframes)} 個 iframe")
+    for idx, iframe in enumerate(iframes):
+        try:
+            src = iframe.get_attribute('src') or ''
+            print(f"🔍 iframe[{idx}]: {src[:80]}")
+            driver.switch_to.frame(iframe)
+            inputs = driver.find_elements(By.TAG_NAME, 'input')
+            visible = [i for i in inputs if i.is_displayed()]
+            if visible:
+                print(f"✅ iframe[{idx}] 有 {len(visible)} 個可見 input")
+                return visible, True
+            # 可能有嵌套 iframe
+            sub_iframes = driver.find_elements(By.TAG_NAME, 'iframe')
+            for sub in sub_iframes:
+                try:
+                    driver.switch_to.frame(sub)
+                    inputs = driver.find_elements(By.TAG_NAME, 'input')
+                    visible = [i for i in inputs if i.is_displayed()]
+                    if visible:
+                        print(f"✅ 嵌套 iframe 有 {len(visible)} 個可見 input")
+                        return visible, True
+                    driver.switch_to.parent_frame()
+                except:
+                    driver.switch_to.parent_frame()
+            driver.switch_to.default_content()
+        except Exception as e:
+            print(f"⚠️ iframe[{idx}] 錯誤: {e}")
+            driver.switch_to.default_content()
+
+    # 3. 嘗試 JavaScript 搜尋（含 shadow DOM）
+    count = driver.execute_script("""
+        function findInputs(root) {
+            var found = [];
+            root.querySelectorAll('input').forEach(i => found.push(i));
+            root.querySelectorAll('*').forEach(el => {
+                if (el.shadowRoot) {
+                    el.shadowRoot.querySelectorAll('input').forEach(i => found.push(i));
+                }
+            });
+            return found.length;
+        }
+        return findInputs(document);
+    """)
+    print(f"🔍 JS 搜尋 input (含 shadow DOM): {count}")
+
+    return [], False
+
+
 def login_casino(driver):
     """登入娛樂城"""
     print(f"🌐 前往 {CASINO_URL}")
     driver.get(CASINO_URL)
-    time.sleep(5)
 
-    print(f"🔍 頁面: {driver.title} | URL: {driver.current_url}")
+    # SPA 需要等待 — 最多等 30 秒
+    print("⏳ 等待頁面載入...")
+    for wait in range(6):
+        time.sleep(5)
+        # 診斷頁面
+        diag = driver.execute_script("""
+            return {
+                url: location.href,
+                title: document.title,
+                body: (document.body.innerText || '').substring(0, 200),
+                inputs: document.querySelectorAll('input').length,
+                iframes: document.querySelectorAll('iframe').length,
+                divs: document.querySelectorAll('div').length
+            };
+        """)
+        print(f"🔍 [{(wait+1)*5}s] inputs={diag['inputs']} iframes={diag['iframes']} divs={diag['divs']} title={diag['title']}")
+        
+        if diag['inputs'] > 0:
+            break
+        if 'login' in diag['body'].lower() or '登入' in diag['body'] or '帳號' in diag['body']:
+            print("🔍 頁面有登入相關文字，繼續搜尋...")
+            break
 
-    # 找帳號密碼欄位（主頁 + iframe）
-    inputs = driver.find_elements(By.TAG_NAME, 'input')
-    print(f"🔍 主頁 input: {len(inputs)}")
+    # 搜尋所有 frame 中的 input
+    inputs, in_iframe = find_inputs_in_all_frames(driver)
+    print(f"🔍 最終找到 {len(inputs)} 個可見 input")
 
-    in_iframe = False
-    if len(inputs) == 0:
-        iframes = driver.find_elements(By.TAG_NAME, 'iframe')
-        for iframe in iframes:
-            try:
-                driver.switch_to.frame(iframe)
-                inputs = driver.find_elements(By.TAG_NAME, 'input')
-                if len(inputs) > 0:
-                    print(f"🔍 iframe input: {len(inputs)}")
-                    in_iframe = True
-                    break
-                driver.switch_to.default_content()
-            except:
-                driver.switch_to.default_content()
-
-    if len(inputs) == 0:
-        print("⏳ 等10秒...")
-        time.sleep(10)
-        inputs = driver.find_elements(By.TAG_NAME, 'input')
-
-    user_input = pass_input = None
-    for inp in inputs:
-        t = (inp.get_attribute('type') or '').lower()
-        if t == 'password' and not pass_input:
-            pass_input = inp
-        elif t in ('text', 'tel', '') and not user_input and t != 'hidden':
-            user_input = inp
-
-    if not user_input or not pass_input:
+    if not inputs:
+        # 最後嘗試：截圖看看頁面長什麼樣
+        try:
+            driver.save_screenshot('/tmp/mt_login_debug.png')
+            print("📸 截圖已存: /tmp/mt_login_debug.png")
+        except:
+            pass
+        # 輸出頁面 HTML 片段
+        html = driver.execute_script("return document.body.innerHTML.substring(0, 1000)")
+        print(f"📄 HTML: {html[:300]}")
         print(f"❌ 找不到帳密欄位")
         return False
 
+    user_input = pass_input = None
+    for inp in inputs:
+        try:
+            t = (inp.get_attribute('type') or '').lower()
+            if t == 'password' and not pass_input:
+                pass_input = inp
+            elif t in ('text', 'tel', '') and not user_input and t != 'hidden':
+                user_input = inp
+        except:
+            pass
+
+    if not user_input or not pass_input:
+        # 如果只有2個input，第一個=帳號 第二個=密碼
+        if len(inputs) >= 2:
+            user_input = inputs[0]
+            pass_input = inputs[1]
+            print("🔑 用前兩個 input 作為帳號/密碼")
+        else:
+            print(f"❌ 無法辨識帳密欄位 (找到 {len(inputs)} 個)")
+            return False
+
     print("🔑 填入帳號密碼...")
-    user_input.clear()
-    user_input.send_keys(CASINO_USER)
-    time.sleep(0.3)
-    pass_input.clear()
-    pass_input.send_keys(CASINO_PASS)
-    time.sleep(0.3)
+    try:
+        user_input.click()
+        time.sleep(0.2)
+        user_input.clear()
+        user_input.send_keys(CASINO_USER)
+        time.sleep(0.3)
+        pass_input.click()
+        time.sleep(0.2)
+        pass_input.clear()
+        pass_input.send_keys(CASINO_PASS)
+        time.sleep(0.3)
+    except Exception as e:
+        print(f"⚠️ 填入失敗: {e}")
+        # 用 JS 填入
+        driver.execute_script("""
+            arguments[0].value = arguments[2];
+            arguments[0].dispatchEvent(new Event('input', {bubbles: true}));
+            arguments[1].value = arguments[3];
+            arguments[1].dispatchEvent(new Event('input', {bubbles: true}));
+        """, user_input, pass_input, CASINO_USER, CASINO_PASS)
+        print("🔑 用 JS 填入")
+
+    time.sleep(0.5)
 
     # 找登入按鈕
     login_btn = None
-    for btn in driver.find_elements(By.TAG_NAME, 'button'):
-        txt = btn.text.strip()
-        if txt in ('登入', '登錄', 'Login', '確定'):
-            login_btn = btn
-            break
-    if not login_btn:
-        subs = driver.find_elements(By.CSS_SELECTOR, 'button[type="submit"], input[type="submit"]')
-        if subs:
-            login_btn = subs[0]
+    try:
+        buttons = driver.find_elements(By.TAG_NAME, 'button')
+        for btn in buttons:
+            try:
+                txt = btn.text.strip()
+                if txt and any(w in txt for w in ['登入', '登錄', 'Login', '確定', '提交']):
+                    login_btn = btn
+                    break
+            except:
+                pass
+        if not login_btn:
+            subs = driver.find_elements(By.CSS_SELECTOR, 'button[type="submit"], input[type="submit"], [class*="login"], [class*="submit"]')
+            if subs:
+                login_btn = subs[0]
+    except:
+        pass
 
     if login_btn:
         login_btn.click()
-        print(f"🖱️ 點擊登入: {login_btn.text.strip()}")
+        print(f"🖱️ 點擊登入")
     else:
         from selenium.webdriver.common.keys import Keys
         pass_input.send_keys(Keys.RETURN)
