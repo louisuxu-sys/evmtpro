@@ -198,26 +198,37 @@ async function handleLineEvent(event) {
     return;
   }
 
-  // ===== 跟隨房間: "第N廳" / "跟隨N" / 直接輸入數字 =====
-  const followMatch = text.match(/^(?:第|跟隨|跟随)?(\d+)(?:廳|厅)?$/);
+  // ===== 跟隨房間: 輸入真實房號 (2, B01, 3A等) =====
+  const followMatch = text.match(/^(?:第|跟隨|跟随)?([0-9B][0-9A-Za-z]*)(?:廳|厅)?$/);
   if (followMatch) {
-    const num = parseInt(followMatch[1]);
-    if (tables.has(num)) {
-      const engine = tables.get(num);
-      const mtId = localToMtMap.get(num);
-      userFollowing.set(targetId, { mtTableId: mtId, localId: num });
-
+    const inputKey = followMatch[1].toUpperCase();
+    // 找對應的 MT 房號
+    let targetLocalId = null;
+    for (const [lid, eng] of tables) {
+      const mid = localToMtMap.get(lid);
+      const mi = mid ? mtConnector.tables.get(mid) : null;
+      if (mi && String(mi.displayNum).toUpperCase() === inputKey) {
+        targetLocalId = lid;
+        break;
+      }
+    }
+    if (targetLocalId !== null) {
+      const engine = tables.get(targetLocalId);
+      const mtId = localToMtMap.get(targetLocalId);
+      userFollowing.set(targetId, { mtTableId: mtId, localId: targetLocalId });
       const state = engine.getState();
-      const shoe = engine._shoe || '';
       await replyMessage(replyToken,
-        `🔗 正在連線第${num}廳，稍等...\n\n` +
-        `✅ 已開始跟隨第${num}廳\n` +
-        `靴 ${state.handCount > 0 ? `第${state.handCount}手` : '等待下一手'}，等待下一手...\n` +
-        `荷官: ${state.dealer || '未知'}\n\n` +
-        `每手開牌會自動推送牌型及 EV 值\n輸入「取消」停止跟隨`
+        `✅ 已開始跟隨「${engine.tableName}」
+` +
+        `荷官: ${state.dealer || '-'}
+
+` +
+        `每手開牌會自動推送牌型及 EV 值
+輸入「取消」停止跟隨`
       );
     } else {
-      await replyMessage(replyToken, `❌ 找不到第${num}廳\n輸入「全廳」查看可用房間`);
+      await replyMessage(replyToken, `❌ 找不到「${inputKey}」房
+輸入「全廳」查看可用房間`);
     }
     return;
   }
@@ -237,18 +248,23 @@ async function handleLineEvent(event) {
   // ===== 指令幫助 =====
   if (text === '指令' || text === '幫助' || text === 'help') {
     await replyMessage(replyToken,
-      `🎰 百家之眼 - 指令列表\n\n` +
-      `📊 全廳 - 查看所有百家樂房間\n` +
-      `� 第N廳 - 跟隨第N廳 (如: 第3廳)\n` +
-      `   也可直接輸入數字，如: 3\n` +
-      `❌ 取消 - 停止跟隨\n` +
+      `🎰 百家之眼 - 指令列表
+` +
+      `📊 全廳 - 查看所有百家樂房間
+` +
+      `   輸入房號跟隨，如: 2 或 B01
+` +
+      `❌ 取消 - 停止跟隨
+` +
       `❓ 指令 - 顯示此幫助`
     );
     return;
   }
 
   // ===== 未知指令 =====
-  await replyMessage(replyToken, `🎰 百家之眼\n輸入「全廳」查看房間\n輸入「指令」查看功能`);
+  await replyMessage(replyToken, `🎰 百家之眼
+輸入「全廳」查看房間
+輸入「指令」查看功能`);
 }
 
 // LINE 回覆訊息
@@ -299,36 +315,44 @@ function fmtHand(cards) {
   return cards.map(c => fmtCard(c)).join(' ');
 }
 
-// 房間列表
+// 房間列表 (按真實房號排序)
 function getRoomList() {
   if (tables.size === 0) return '⏳ 正在連線 MT 平台，請稍候...';
 
-  let text = `🎰 百家之眼 - MT百家樂\n━━━━━━━━━━━━━━━━\n`;
-  let count = 0;
-  for (const [id, engine] of tables) {
-    count++;
-    if (count > 20) {
-      text += `\n... 還有 ${tables.size - 20} 個房間`;
-      break;
-    }
-    const name = engine.tableName || `百家樂 ${id}`;
-    const mtId = localToMtMap.get(id);
+  // 建立以房號排序的列表
+  const roomList = [];
+  for (const [lid, engine] of tables) {
+    const mtId = localToMtMap.get(lid);
     const mtInfo = mtId ? mtConnector.tables.get(mtId) : null;
-    const summary = mtInfo?.summary;
-    const dealer = engine.dealer || mtInfo?.dealer || '-';
-    const road = mtInfo?.roadText || '';
-
-    let line = `\n${id}. ${name}`;
-    if (dealer && dealer !== '-') line += ` | ${dealer}`;
-    if (summary && summary.total > 0) {
-      line += `\n   莊${summary.banker} 閒${summary.player} 和${summary.tie} (共${summary.total}局)`;
-    }
-    if (road) line += `\n   ${road.substring(0, 30)}`;
-    text += line;
+    if (!mtInfo) continue;
+    roomList.push({ lid, engine, mtInfo });
   }
-  text += `\n\n━━━━━━━━━━━━━━━━\n`;
-  text += `共 ${tables.size} 個百家樂桌\n`;
-  text += `輸入數字跟隨，如: 3`;
+  // 自然排序: 數字房號先，然後 B 系列
+  roomList.sort((a, b) => {
+    const na = String(a.mtInfo.displayNum), nb = String(b.mtInfo.displayNum);
+    const ia = parseInt(na) || 999, ib = parseInt(nb) || 999;
+    if (ia !== ib) return ia - ib;
+    return na.localeCompare(nb);
+  });
+
+  let text = `🎰 百家之眼 - MT百家樂
+`;
+  for (const { lid, engine, mtInfo } of roomList) {
+    const summary = mtInfo.summary;
+    const dealer = mtInfo.dealer?.name || '-';
+    const road = mtInfo.roadText || '';
+    const rn = mtInfo.displayNum;
+
+    text += `\n${engine.tableName}`;
+    if (dealer && dealer !== '-') text += ` | 👤${dealer}`;
+    if (summary && summary.total > 0) {
+      text += `\n   莊${summary.banker} 閒${summary.player} 和${summary.tie} (共${summary.total}局)`;
+    }
+    if (road) text += `\n   ${road.substring(0, 30)}`;
+  }
+  text += `\n\n━━━━━━━━\n`;
+  text += `共 ${roomList.length} 個百家樂桌\n`;
+  text += `輸入房號跟隨，如: 2 或 B01`;
   return text;
 }
 
