@@ -946,10 +946,17 @@ class MTConnector extends EventEmitter {
       if (summary.Banker === undefined || summary.Player === undefined) return;
       if (typeof summary.Banker !== 'number' || typeof summary.Player !== 'number') return;
 
-      // 桌號命名
-      // C 值是桌號標識，但需要對應到 MT 大廳的編號
-      const tableName = `百家樂 ${tableNum || tableId}`;
-      console.log(`🔍 DD桌 SI=${tableId} C=${tableNum} Summary.Total=${summary.Total} B=${summary.Banker} P=${summary.Player} T=${summary.Tie}`);
+      // 只收 gc + 5~6 位數字 的百家樂桌 (排除 GCBC、純數字長編號等)
+      // 有效: gc011012, gc023002, gc020001, gc011015
+      // 排除: GCBC20201106, 2012160125, 2201050144
+      if (!/^gc\d{5,6}$/i.test(tableId)) return;
+
+      // 從 SI 提取桌號：gc011012 → 取後3~4位得到實際桌號
+      // gc011012: 011=系列 012=桌號? 或者最後3位 012
+      // gc023002: 023=系列 002=桌號?
+      // 直接用完整 SI 作為唯一標識，在 DOM 讀取時再匹配正確桌號
+      const tableName = `百家樂 ${tableId}`;
+      console.log(`🔍 DD桌 SI=${tableId} C=${tableNum} Total=${summary.Total} B=${summary.Banker} P=${summary.Player} T=${summary.Tie}`);
 
       // 建立/更新牌桌
       if (!this.tables.has(tableId)) {
