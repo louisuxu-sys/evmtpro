@@ -70,6 +70,24 @@ mtConnector.on('tables_list', (mtTables) => {
   broadcastWS({ type: 'init', tables: allStates });
 });
 
+// MT 事件: DOM 更新 -> 更新荷官名字、牌路
+mtConnector.on('dom_update', (domData) => {
+  for (const d of domData) {
+    // 用桌號匹配
+    for (const [mtId, localId] of mtTableIdMap) {
+      const mtInfo = mtConnector.tables.get(mtId);
+      if (!mtInfo) continue;
+      const num = String(mtInfo.tableNum || '');
+      if (num === String(d.tableNum)) {
+        const engine = tables.get(localId);
+        if (engine && d.dealer) engine.setDealer(d.dealer);
+        if (mtInfo && d.road) mtInfo.roadText = d.road;
+        if (mtInfo && d.online) mtInfo.onlinePlayers = d.online;
+      }
+    }
+  }
+});
+
 // MT 事件: 開牌結果 -> 記錄 + 推送給跟隨用戶
 mtConnector.on('game_result', (data) => {
   const localId = mtTableIdMap.get(data.tableId);

@@ -145,6 +145,8 @@ class MTConnector extends EventEmitter {
         this._gameWsId = requestId;
         this._loginMode = false;
         this.emit('connected');
+        // 啟動 DOM 定期讀取
+        this._startDOMScraper();
       }
     });
 
@@ -680,6 +682,148 @@ class MTConnector extends EventEmitter {
 
   _sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  // ===== DOM 定期讀取（荷官、牌路、統計） =====
+  _startDOMScraper() {
+    if (this._domInterval) return; // 避免重複啟動
+    console.log('🔍 DOM讀取器: 啟動 (每15秒)');
+
+    // 等10秒讓遊戲頁面完全載入
+    setTimeout(() => {
+      this._domInterval = setInterval(() => this._scrapeDOMTables(), 15000);
+      this._scrapeDOMTables(); // 立即執行一次
+    }, 10000);
+  }
+
+  async _scrapeDOMTables() {
+    if (!this.page) return;
+    try {
+      // 找到遊戲頁面（可能是新視窗）
+      const pages = await this.browser.pages();
+      let gamePage = null;
+      for (const p of pages) {
+        const url = await p.url().catch(() => '');
+        if (url.includes('ofalive') || url.includes('rbjork') || url.includes('game')) {
+          gamePage = p;
+          break;
+        }
+      }
+      if (!gamePage) gamePage = this.page;
+
+      const domData = await gamePage.evaluate(() => {
+        var result = [];
+        var allElements = document.querySelectorAll('*');
+
+        for (var i = 0; i < allElements.length; i++) {
+          var el = allElements[i];
+          var text = el.innerText || '';
+          if (text.length < 10 || text.length > 500) continue;
+          if (!text.includes('百家樂')) continue;
+          if (!text.includes('莊')) continue;
+          if (!text.includes('閒')) continue;
+
+          // 提取桌號
+          var tableMatch = text.match(/百家樂\s*(\S+)/);
+          var tableNum = tableMatch ? tableMatch[1] : '?';
+
+          // 提取統計
+          var statsMatch = text.match(/莊\s*(\d+)\s*(?:.*?)閒\s*(\d+)\s*(?:.*?)和\s*(\d+)/);
+          var banker = statsMatch ? parseInt(statsMatch[1]) : 0;
+          var player = statsMatch ? parseInt(statsMatch[2]) : 0;
+          var tie = statsMatch ? parseInt(statsMatch[3]) : 0;
+
+          // 提取荷官（中文名或英文名）
+          var dealer = '';
+          var dm = text.match(/中文\s+([\u4e00-\u9fff]+)/);
+          if (dm) { dealer = dm[1]; }
+          else {
+            dm = text.match(/([A-Z][A-Z ]{2,20})(?:\s|$)/);
+            if (dm) dealer = dm[1].trim();
+          }
+          if (!dealer) {
+            // 最後一行非數字中文名
+            var lines = text.split('\n').filter(l => l.trim());
+            for (var j = lines.length - 1; j >= 0; j--) {
+              var line = lines[j].trim();
+              if (/^[\u4e00-\u9fff]{2,4}$/.test(line)) {
+                dealer = line;
+                break;
+              }
+              if (/^[A-Z][A-Z ]{2,15}$/.test(line)) {
+                dealer = line;
+                break;
+              }
+            }
+          }
+
+          // 提取人數
+          var pMatch = text.match(/(\d+)\s*人/);
+          var online = pMatch ? parseInt(pMatch[1]) : 0;
+
+          // 牌路文字
+          var road = '';
+          var roadMatch = text.match(/([莊閒和]{4,})/g);
+          if (roadMatch) road = roadMatch.join('');
+
+          result.push({
+            tableNum: tableNum,
+            banker: banker,
+            player: player,
+            tie: tie,
+            dealer: dealer,
+            online: online,
+            road: road.substring(0, 60),
+            textLen: text.length,
+          });
+        }
+
+        // 去重
+        var seen = {};
+        return result.filter(function(r) {
+          var key = r.tableNum + '_' + r.banker + '_' + r.player;
+          if (seen[key]) return false;
+          seen[key] = true;
+          return true;
+        });
+      });
+
+      if (domData && domData.length > 0) {
+        if (!this._domLogCount) this._domLogCount = 0;
+        this._domLogCount++;
+
+        // 更新 tables Map 裡的荷官和牌路
+        for (const d of domData) {
+          // 用桌號匹配已有的 table
+          for (const [tableId, info] of this.tables) {
+            const existNum = String(info.tableNum || '');
+            if (existNum === String(d.tableNum) || tableId.includes(d.tableNum)) {
+              if (d.dealer && d.dealer !== '') {
+                info.dealer = { name: d.dealer };
+              }
+              if (d.road) info.roadText = d.road;
+              if (d.online) info.onlinePlayers = d.online;
+            }
+          }
+        }
+
+        // 每5次輸出一次日誌
+        if (this._domLogCount <= 3 || this._domLogCount % 5 === 0) {
+          console.log(`🔍 DOM讀取: ${domData.length} 張桌 | 範例: ${domData.slice(0, 3).map(d => `${d.tableNum}(${d.dealer || '?'})`).join(', ')}`);
+        }
+
+        // 發出 DOM 更新事件
+        this.emit('dom_update', domData);
+      } else {
+        if (!this._domEmptyCount) this._domEmptyCount = 0;
+        this._domEmptyCount++;
+        if (this._domEmptyCount <= 3) {
+          console.log('🔍 DOM讀取: 未找到百家樂桌');
+        }
+      }
+    } catch (e) {
+      // 靜默失敗，避免打斷 WS
+    }
   }
 
   // 處理從瀏覽器收到的 WebSocket 訊息
