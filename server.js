@@ -327,6 +327,66 @@ function formatHandResult(localId, engine, ev, detail) {
   return msg;
 }
 
+// ===== Python 外接資料接收 =====
+app.post('/api/mt-data', (req, res) => {
+  const data = req.body;
+  if (!data || !data.type) return res.status(400).json({ error: 'Missing type' });
+
+  console.log(`📩 Python: ${data.type}`);
+
+  if (data.type === 'tables_update' && Array.isArray(data.tables)) {
+    // 處理牌桌列表
+    for (const t of data.tables) {
+      const tableId = t.tableId;
+      if (!tableId) continue;
+
+      if (!mtTableIdMap.has(tableId)) {
+        const localId = tables.size + 1;
+        const engine = new BaccaratEngine(localId, t.tableName || `MT-${tableId}`);
+        engine._mtTableId = tableId;
+        tables.set(localId, engine);
+        mtTableIdMap.set(tableId, localId);
+        localToMtMap.set(localId, tableId);
+        // 儲存 summary 到 mtConnector.tables
+        mtConnector.tables.set(tableId, t);
+        console.log(`  ✅ 第${localId}廳: ${t.tableName} (Python)`);
+      } else {
+        // 更新
+        const localId = mtTableIdMap.get(tableId);
+        mtConnector.tables.set(tableId, t);
+      }
+    }
+    console.log(`📋 Python: ${data.tables.length} 張牌桌, 共 ${tables.size} 廳`);
+    return res.json({ ok: true, tables: tables.size });
+  }
+
+  if (data.type === 'game_result') {
+    const localId = mtTableIdMap.get(data.tableId);
+    if (localId && tables.has(localId)) {
+      const engine = tables.get(localId);
+      const winner = data.winner === 'B' ? 'B' : data.winner === 'P' ? 'P' : 'T';
+      const ev = engine.recordHand(winner, null, null);
+      const state = engine.getState();
+      broadcastWS({ type: 'update', tableId: localId, state });
+      pushToFollowers(data.tableId, localId, engine, ev, state.handDetails[state.handDetails.length - 1]);
+      console.log(`🃏 Python開牌: 第${localId}廳 → ${winner === 'B' ? '莊' : winner === 'P' ? '閒' : '和'}`);
+    }
+    // 更新 summary
+    if (data.summary && data.tableId) {
+      const mt = mtConnector.tables.get(data.tableId);
+      if (mt) mt.summary = data.summary;
+    }
+    return res.json({ ok: true });
+  }
+
+  if (data.type === 'dom_tables' && Array.isArray(data.tables)) {
+    console.log(`📋 Python DOM: ${data.tables.length} 張牌桌`);
+    return res.json({ ok: true });
+  }
+
+  res.json({ ok: true });
+});
+
 // ===== API 路由 =====
 
 // 取得全廳狀態
