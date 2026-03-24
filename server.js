@@ -70,22 +70,23 @@ mtConnector.on('tables_list', (mtTables) => {
   broadcastWS({ type: 'init', tables: allStates });
 });
 
-// MT 事件: DOM 更新 -> 更新荷官名字、牌路
-mtConnector.on('dom_update', (domData) => {
-  for (const d of domData) {
-    // 用桌號匹配
-    for (const [mtId, localId] of mtTableIdMap) {
-      const mtInfo = mtConnector.tables.get(mtId);
-      if (!mtInfo) continue;
-      const num = String(mtInfo.tableNum || '');
-      if (num === String(d.tableNum)) {
-        const engine = tables.get(localId);
-        if (engine && d.dealer) engine.setDealer(d.dealer);
-        if (mtInfo && d.road) mtInfo.roadText = d.road;
-        if (mtInfo && d.online) mtInfo.onlinePlayers = d.online;
+// MT 事件: Canvas 荷官名字更新
+mtConnector.on('dealer_update', (dealerList) => {
+  // dealerList 按 y 座標排序的荷官名字
+  // 嘗試按順序配對到桌（假設 Canvas 上的桌順序跟建立順序一致）
+  const tableArray = Array.from(tables.entries()).sort((a, b) => a[0] - b[0]);
+  for (let i = 0; i < dealerList.length && i < tableArray.length; i++) {
+    const [localId, engine] = tableArray[i];
+    if (dealerList[i]?.name) {
+      engine.setDealer(dealerList[i].name);
+      const mtId = localToMtMap.get(localId);
+      if (mtId) {
+        const mtInfo = mtConnector.tables.get(mtId);
+        if (mtInfo) mtInfo.dealer = { name: dealerList[i].name };
       }
     }
   }
+  console.log(`👩 荷官更新: ${dealerList.map(d => d.name).join(', ')}`);
 });
 
 // MT 事件: 開牌結果 -> 記錄 + 推送給跟隨用戶

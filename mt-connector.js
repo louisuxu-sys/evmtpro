@@ -76,6 +76,9 @@ class MTConnector extends EventEmitter {
           this.page = newPage;
           await this.page.setViewport({ width: 1280, height: 800 });
 
+          // 注入 Canvas fillText 攔截器（必須在遊戲 Canvas 渲染前）
+          await this._injectCanvasHook(newPage);
+
           // 立即 attach CDP（不等頁面載入完，避免錯過早期 WS）
           await this._attachCDP(newPage);
           console.log('✅ MT連線器: 已切換到新視窗並附加 CDP');
@@ -145,8 +148,8 @@ class MTConnector extends EventEmitter {
         this._gameWsId = requestId;
         this._loginMode = false;
         this.emit('connected');
-        // 啟動 DOM 定期讀取
-        this._startDOMScraper();
+        // 啟動 Canvas 文字收集器（讀取荷官名字）
+        this._startCanvasCollector();
       }
     });
 
@@ -684,19 +687,238 @@ class MTConnector extends EventEmitter {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  // ===== DOM 定期讀取（荷官、牌路、統計） =====
-  // 注意: MT 遊戲用 Canvas/WebGL 渲染，DOM 讀不到遊戲內容
-  // 改為從 WS 資料提取荷官資訊
-  _startDOMScraper() {
-    if (this._domInterval) return;
-    console.log('🔍 DOM讀取器: 跳過（MT 用 Canvas 渲染，改用 WS 資料）');
-    return; // 暫停 DOM 讀取
+  // ===== Canvas fillText 攔截器 =====
+  // 在遊戲頁面載入前注入，攔截所有 Canvas 文字渲染
+  async _injectCanvasHook(page) {
+    try {
+      await page.evaluateOnNewDocument(() => {
+        // Hook CanvasRenderingContext2D.fillText
+        const _origFillText = CanvasRenderingContext2D.prototype.fillText;
+        const _origStrokeText = CanvasRenderingContext2D.prototype.strokeText;
 
-    // 等10秒讓遊戲頁面完全載入
+        // 儲存攔截到的文字（環形緩衝區，最多 500 條）
+        window.__canvasTexts = [];
+        window.__canvasTextMap = {}; // 去重用
+        window.__canvasTextCount = 0;
+
+        function captureText(text, x, y, ctx) {
+          if (!text || typeof text !== 'string') return;
+          var str = text.trim();
+          if (str.length === 0 || str.length > 50) return;
+
+          // 取得字體大小和樣式
+          var font = ctx.font || '';
+          var fillStyle = ctx.fillStyle || '';
+
+          // 用 text+位置 去重（同樣的文字在同樣位置不重複記錄）
+          var key = str + '|' + Math.round(x) + '|' + Math.round(y);
+          var now = Date.now();
+          var last = window.__canvasTextMap[key];
+          if (last && now - last < 3000) return; // 3 秒內重複的忽略
+          window.__canvasTextMap[key] = now;
+
+          window.__canvasTexts.push({
+            t: str,
+            x: Math.round(x),
+            y: Math.round(y),
+            f: font,
+            ts: now
+          });
+
+          // 限制大小
+          if (window.__canvasTexts.length > 500) {
+            window.__canvasTexts = window.__canvasTexts.slice(-300);
+          }
+
+          window.__canvasTextCount++;
+        }
+
+        CanvasRenderingContext2D.prototype.fillText = function(text, x, y, maxWidth) {
+          captureText(text, x, y, this);
+          return _origFillText.apply(this, arguments);
+        };
+
+        CanvasRenderingContext2D.prototype.strokeText = function(text, x, y, maxWidth) {
+          captureText(text, x, y, this);
+          return _origStrokeText.apply(this, arguments);
+        };
+      });
+      console.log('🎨 Canvas攔截器: 已注入 fillText/strokeText hook');
+    } catch (e) {
+      console.error('⚠️ Canvas攔截器注入失敗:', e.message);
+    }
+  }
+
+  // 啟動 Canvas 文字收集器（定期從遊戲頁面讀取攔截到的文字）
+  _startCanvasCollector() {
+    if (this._canvasInterval) return;
+    console.log('🎨 Canvas收集器: 啟動 (每20秒)');
+
+    // 等15秒讓遊戲完全載入
     setTimeout(() => {
-      this._domInterval = setInterval(() => this._scrapeDOMTables(), 15000);
-      this._scrapeDOMTables(); // 立即執行一次
-    }, 10000);
+      this._canvasInterval = setInterval(() => this._collectCanvasTexts(), 20000);
+      this._collectCanvasTexts(); // 立即執行一次
+    }, 15000);
+  }
+
+  async _collectCanvasTexts() {
+    if (!this.page) return;
+    try {
+      // 找到遊戲頁面
+      const pages = await this.browser.pages();
+      let gamePage = null;
+      for (const p of pages) {
+        const url = await p.url().catch(() => '');
+        if (url.includes('ofalive') || url.includes('rbjork') || url.includes('game')) {
+          gamePage = p;
+          break;
+        }
+      }
+      if (!gamePage) gamePage = this.page;
+
+      // 讀取攔截到的文字
+      const result = await gamePage.evaluate(() => {
+        if (!window.__canvasTexts) return { texts: [], count: 0 };
+        var now = Date.now();
+        // 只取最近 30 秒內的文字
+        var recent = window.__canvasTexts.filter(function(t) {
+          return now - t.ts < 30000;
+        });
+        return {
+          texts: recent,
+          count: window.__canvasTextCount || 0
+        };
+      });
+
+      if (!this._canvasLogCount) this._canvasLogCount = 0;
+      this._canvasLogCount++;
+
+      if (result.texts.length > 0) {
+        // 分析文字，找荷官名字
+        this._analyzeCanvasTexts(result.texts);
+
+        // 前5次或每10次輸出完整日誌
+        if (this._canvasLogCount <= 5 || this._canvasLogCount % 10 === 0) {
+          // 取不重複的文字列表
+          const unique = [...new Set(result.texts.map(t => t.t))];
+          console.log(`🎨 Canvas文字: ${result.texts.length}條(共${result.count}) | ${unique.slice(0, 20).join(', ')}`);
+        }
+      } else {
+        if (this._canvasLogCount <= 3) {
+          console.log(`🎨 Canvas文字: 無 (hook 可能未生效或遊戲未載入)`);
+        }
+      }
+    } catch (e) {
+      // 靜默
+    }
+  }
+
+  // 分析 Canvas 文字，找出荷官名字
+  _analyzeCanvasTexts(texts) {
+    // 荷官名字特徵：
+    // 1. 2-4 個中文字（如：田田、炸雞、淇寶）
+    // 2. 或英文名（如：ANNA、BELLA）
+    // 3. 通常在特定 y 座標範圍
+    // 4. 字體大小適中（不是太大的標題也不是太小的數字）
+
+    const dealerCandidates = [];
+
+    for (const t of texts) {
+      const str = t.t;
+
+      // 排除純數字、百分比、金額
+      if (/^[\d.,:%$€¥+\-]+$/.test(str)) continue;
+      // 排除常見 UI 文字
+      if (/^(莊|閒|和|Banker|Player|Tie|Super|Bet|Deal|Cancel|OK|Pair)$/i.test(str)) continue;
+      if (/^(下注|確認|取消|歷史|路|局|靴|限紅|餘額|balance)/i.test(str)) continue;
+      // 排除太長的
+      if (str.length > 10) continue;
+
+      // 中文名字：2-4 個中文字
+      if (/^[\u4e00-\u9fff]{2,4}$/.test(str)) {
+        // 排除常見非名字的中文（遊戲術語）
+        if (/^(百家樂|龍虎|骰寶|輪盤|牛牛|炸金花|莊家|閒家|和局|莊贏|閒贏|開牌|下注|確認|取消|免水|極速|經典|賭桌|換桌|歷史|路單|大路|小路|大眼|蟑螂|珠盤|限額|投注)$/.test(str)) continue;
+        dealerCandidates.push({ name: str, x: t.x, y: t.y, font: t.f, type: 'zh' });
+      }
+
+      // 英文名字：大寫開頭，2-15 字母
+      if (/^[A-Z][a-zA-Z]{1,14}$/.test(str)) {
+        if (/^(Banker|Player|Tie|Super|Deal|Cancel|Pair|Natural|Win|Lose|Draw|Bet|Big|Small|Even|Odd|Dragon|Tiger|Bull|Loading|Welcome)$/i.test(str)) continue;
+        dealerCandidates.push({ name: str, x: t.x, y: t.y, font: t.f, type: 'en' });
+      }
+    }
+
+    if (dealerCandidates.length > 0) {
+      if (!this._dealerCandidateLog) this._dealerCandidateLog = 0;
+      this._dealerCandidateLog++;
+
+      // 更新荷官名字到 tables
+      // 目前先蒐集所有候選，後續配對
+      if (!this._dealerNames) this._dealerNames = new Set();
+      const newNames = [];
+      for (const d of dealerCandidates) {
+        if (!this._dealerNames.has(d.name)) {
+          this._dealerNames.add(d.name);
+          newNames.push(d.name);
+        }
+      }
+
+      if (newNames.length > 0) {
+        console.log(`👩 發現荷官候選: ${newNames.join(', ')} (累計: ${this._dealerNames.size}個)`);
+      }
+
+      // 嘗試配對荷官到桌（按 Canvas 上的 x 座標分組）
+      this._matchDealersToTables(dealerCandidates);
+    }
+  }
+
+  // 嘗試將荷官名字配對到百家樂桌
+  _matchDealersToTables(candidates) {
+    if (candidates.length === 0) return;
+
+    // MT 大廳的桌通常在 Canvas 上按列排列
+    // 每個桌的荷官名字在桌卡片的特定位置
+    // 先儲存所有候選，等收集足夠資料後再配對
+    if (!this._allDealerData) this._allDealerData = [];
+    this._allDealerData = this._allDealerData.concat(candidates);
+    // 只保留最近的
+    if (this._allDealerData.length > 200) {
+      this._allDealerData = this._allDealerData.slice(-100);
+    }
+
+    // 按 x,y 座標分群，每群可能對應一張桌
+    // 使用簡單的 y 座標分群（同一行的桌 y 座標接近）
+    const yGroups = {};
+    for (const d of candidates) {
+      const yKey = Math.round(d.y / 50) * 50; // 50px 精度分群
+      if (!yGroups[yKey]) yGroups[yKey] = [];
+      yGroups[yKey].push(d);
+    }
+
+    // 對每個群，取出現次數最多的名字
+    const dealerList = [];
+    for (const [y, group] of Object.entries(yGroups)) {
+      const nameCounts = {};
+      for (const d of group) {
+        nameCounts[d.name] = (nameCounts[d.name] || 0) + 1;
+      }
+      // 取最常出現的
+      let best = '', bestCount = 0;
+      for (const [name, count] of Object.entries(nameCounts)) {
+        if (count > bestCount) { best = name; bestCount = count; }
+      }
+      if (best) {
+        dealerList.push({ name: best, y: parseInt(y) });
+      }
+    }
+
+    // 按 y 座標排序，嘗試匹配到桌列表
+    dealerList.sort((a, b) => a.y - b.y);
+
+    if (dealerList.length > 0) {
+      // 發出荷官更新事件
+      this.emit('dealer_update', dealerList);
+    }
   }
 
   async _scrapeDOMTables() {
