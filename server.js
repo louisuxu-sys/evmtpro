@@ -133,8 +133,15 @@ mtConnector.on('error', (err) => {
 // 不再初始化示範桌台 - 改由 MT 自動建立
 console.log('✅ 等待 MT 連線建立桌台...');
 
+// ===== LINE Webhook - GET (LINE Verify 用) =====
+app.get('/webhook', (req, res) => {
+  res.status(200).send('OK');
+});
+
 // ===== LINE Webhook (必須在 express.json() 之前，使用 raw body 驗證簽名) =====
 app.post('/webhook', express.raw({ type: '*/*' }), (req, res) => {
+  // ngrok 免費版 bypass
+  res.setHeader('ngrok-skip-browser-warning', 'true');
   if (!lineConfig.channelSecret || lineConfig.channelSecret === 'dummy_secret') {
     return res.status(200).json({ message: 'LINE BOT not configured' });
   }

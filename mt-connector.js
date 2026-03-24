@@ -763,16 +763,16 @@ class MTConnector extends EventEmitter {
 
   async _diagnoseGamePage() {
     try {
-      const pages = await this.browser.pages();
-      let gamePage = null;
-      for (const p of pages) {
-        const url = await p.url().catch(() => '');
-        if (url.includes('ofalive') || url.includes('rbjork') || url.includes('game') || url.includes('dd.')) {
-          gamePage = p;
-          break;
+      // 直接使用 this.page (已經是遊戲頁面)
+      let gamePage = this.page;
+      // 嘗試找最後一個頁面（通常是新開的遊戲視窗）
+      try {
+        const pages = await this.browser.pages();
+        if (pages.length > 1) {
+          gamePage = pages[pages.length - 1];
         }
-      }
-      if (!gamePage) gamePage = this.page;
+      } catch (e) {}
+      if (!gamePage) return;
 
       if (!this._diagCount) this._diagCount = 0;
       this._diagCount++;
