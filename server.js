@@ -123,11 +123,20 @@ mtConnector.on('game_result', (data) => {
   }
 });
 
+// 每用戶推送冷卻（避免 LINE 429）
+const pushCooldown = new Map(); // userId -> lastPushTimestamp
+const PUSH_COOLDOWN_MS = 3000;
+
 // 推送開牌結果給跟隨用戶（每手推送牌型結果）
 function pushToFollowers(mtTableId, localId, engine, ev, detail) {
   const mtInfo = mtConnector.tables.get(mtTableId);
+  const now = Date.now();
   for (const [userId, info] of userFollowing) {
     if (info.mtTableId === mtTableId) {
+      // 限速：每用戶每 3 秒最多 1 次推送
+      const last = pushCooldown.get(userId) || 0;
+      if (now - last < PUSH_COOLDOWN_MS) continue;
+      pushCooldown.set(userId, now);
       try {
         const flex = buildHandResultFlex(engine, mtInfo, detail);
         pushFlex(userId, flex);
