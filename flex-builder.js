@@ -23,16 +23,21 @@ function circleBox(result, size) {
 }
 
 function emptyCell(size) {
-  size = size || '26px';
-  return { type: 'box', layout: 'vertical', width: size, height: size, contents: [] };
+  size = size || '18px';
+  return { type: 'box', layout: 'vertical', width: size, height: size, contents: [{ type: 'filler' }] };
+}
+
+function dotBox(result, size) {
+  size = size || '12px';
+  const bg = result === 'B' ? COLOR_B : result === 'P' ? COLOR_P : COLOR_T;
+  return { type: 'box', layout: 'vertical', backgroundColor: bg, cornerRadius: '50px', width: size, height: size, contents: [{ type: 'filler' }] };
 }
 
 // ===== 珠盤路 (6 行，由上到下填滿每欄後再往右) =====
 function buildBeadRoadFlex(beadRoad) {
   const ROWS = 6;
-  const MAX_COLS = 16; // 最多顯示 96 筆
-  const MIN_COLS = 12; // 固定寬度（避免 LINE 撐開格距）
-  const CELL = '16px';
+  const MAX_COLS = 15;
+  const CELL = '18px';
   const recent = beadRoad.slice(-(ROWS * MAX_COLS));
 
   if (recent.length === 0) {
@@ -40,57 +45,55 @@ function buildBeadRoadFlex(beadRoad) {
   }
 
   const dataCols = Math.ceil(recent.length / ROWS);
-  const totalCols = Math.max(dataCols, MIN_COLS);
-  const startIdx = recent.length - dataCols * ROWS; // 可能為負（最前欄不滿）
-
   const colBoxes = [];
-  for (let c = 0; c < totalCols; c++) {
+  for (let c = 0; c < dataCols; c++) {
     const cells = [];
     for (let r = 0; r < ROWS; r++) {
-      const idx = startIdx + c * ROWS + r;
-      cells.push((idx >= 0 && idx < recent.length) ? circleBox(recent[idx].result, CELL) : emptyCell(CELL));
+      const idx = c * ROWS + r;
+      cells.push(idx < recent.length ? circleBox(recent[idx].result, CELL) : emptyCell(CELL));
     }
-    colBoxes.push({ type: 'box', layout: 'vertical', flex: 0, spacing: 'xs', contents: cells });
+    colBoxes.push({ type: 'box', layout: 'vertical', contents: cells, spacing: 'xs', flex: 0, width: CELL, alignItems: 'center' });
   }
+  colBoxes.push({ type: 'filler' });
 
-  return [{ type: 'box', layout: 'horizontal', spacing: 'xs', contents: colBoxes }];
+  return [{ type: 'box', layout: 'horizontal', contents: colBoxes, spacing: 'xs', paddingAll: 'xs', backgroundColor: '#F8F9FA', cornerRadius: 'md' }];
 }
 
-// ===== 大路 (每欄向下疊加) =====
+// ===== 大路 (每欄向下疊加，支援 tailing) =====
 function buildBigRoadFlex(bigRoad) {
-  const MAX_COLS = 16;
-  const MIN_COLS = 12;
+  const MAX_COLS = 80;
   const MAX_ROWS = 6;
-  const CELL = '16px';
 
   if (bigRoad.length === 0) {
     return [{ type: 'text', text: '（無資料）', size: 'xs', color: '#aaaaaa' }];
   }
 
   const maxCol = Math.max(...bigRoad.map(e => e.col));
+  const displayCols = Math.min(maxCol + 1, MAX_COLS);
+  const sz = displayCols <= 15 ? '12px' : displayCols <= 25 ? '8px' : displayCols <= 40 ? '6px' : '4px';
   const startCol = Math.max(0, maxCol - MAX_COLS + 1);
-  const totalCols = Math.max(maxCol - startCol + 1, MIN_COLS);
 
-  // grid[c][r] = result
   const grid = {};
   for (const e of bigRoad) {
     const c = e.col - startCol;
-    if (c < 0 || c >= MAX_COLS) continue;
+    if (c < 0) continue;
     if (!grid[c]) grid[c] = {};
     grid[c][e.row] = e.result;
   }
 
   const colBoxes = [];
-  for (let c = 0; c < totalCols; c++) {
+  for (let c = 0; c <= maxCol - startCol; c++) {
+    if (!grid[c]) continue;
     const cells = [];
     for (let r = 0; r < MAX_ROWS; r++) {
-      const res = grid[c] && grid[c][r];
-      cells.push(res ? circleBox(res, CELL) : emptyCell(CELL));
+      const res = grid[c][r];
+      cells.push(res ? dotBox(res, sz) : emptyCell(sz));
     }
-    colBoxes.push({ type: 'box', layout: 'vertical', flex: 0, spacing: 'xs', contents: cells });
+    colBoxes.push({ type: 'box', layout: 'vertical', contents: cells, spacing: 'none', flex: 0, width: sz, alignItems: 'center' });
   }
+  colBoxes.push({ type: 'filler' });
 
-  return [{ type: 'box', layout: 'horizontal', spacing: 'xs', contents: colBoxes }];
+  return [{ type: 'box', layout: 'horizontal', contents: colBoxes, spacing: 'none', paddingAll: 'xs', backgroundColor: '#F8F9FA', cornerRadius: 'md' }];
 }
 
 // ===== 預測演算法 =====
@@ -180,11 +183,28 @@ function historyToBeadRoad(history) {
   return history.map((h, i) => ({ index: i, result: h }));
 }
 function historyToBigRoad(history) {
-  const road = []; let col = 0, row = 0, last = null;
+  const MAX_ROWS = 6;
+  const grid = new Map();
+  let r = 0, c = 0, vertCol = 0, tailing = false, last = null, first = true;
   for (const h of history) {
-    if (h === 'T') { if (road.length > 0) road[road.length - 1].tie = true; continue; }
-    if (h !== last) { col = last === null ? 0 : col + 1; row = 0; } else row++;
-    road.push({ col, row, result: h, tie: false }); last = h;
+    if (h === 'T') continue;
+    if (first) { grid.set(`${r},${c}`, h); first = false; last = h; continue; }
+    if (h === last) {
+      if (!tailing && r + 1 < MAX_ROWS && !grid.has(`${r+1},${c}`)) { r++; }
+      else { tailing = true; c++; while (grid.has(`${r},${c}`)) c++; }
+    } else {
+      tailing = false;
+      let nc = vertCol + 1;
+      r = 0;
+      while (grid.has(`${r},${nc}`)) nc++;
+      c = nc; vertCol = c;
+    }
+    grid.set(`${r},${c}`, h); last = h;
+  }
+  const road = [];
+  for (const [key, result] of grid) {
+    const [row, col] = key.split(',').map(Number);
+    road.push({ col, row, result });
   }
   return road;
 }
