@@ -207,10 +207,23 @@ async function handleLineEvent(event) {
     for (const [lid, eng] of tables) {
       const mid = localToMtMap.get(lid);
       const mi = mid ? mtConnector.tables.get(mid) : null;
-      if (mi && String(mi.displayNum).toUpperCase() === inputKey) {
+      // 比對 displayNum、tableName（去掉"百家樂 "前綴）兩種格式
+      const dnKey = mi ? String(mi.displayNum || '').toUpperCase() : '';
+      const tnKey = String(eng.tableName || '').replace(/^百家樂\s*/,'').toUpperCase();
+      if (dnKey === inputKey || tnKey === inputKey) {
         targetLocalId = lid;
         break;
       }
+    }
+    // debug: 跟隨查找失敗時印出可用房號
+    if (targetLocalId === null) {
+      const available = [];
+      for (const [lid, eng] of tables) {
+        const mid = localToMtMap.get(lid);
+        const mi = mid ? mtConnector.tables.get(mid) : null;
+        available.push(`lid=${lid} dn=${mi?.displayNum} tn=${eng.tableName}`);
+      }
+      console.log(`🔍 跟隨查找失敗 input="${inputKey}" 可用: ${available.join(' | ')}`);
     }
     if (targetLocalId !== null) {
       const engine = tables.get(targetLocalId);
