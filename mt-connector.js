@@ -1347,6 +1347,18 @@ class MTConnector extends EventEmitter {
         info.round = summary.Total || 0;
       }
 
+      // 提取荷官名稱 (N) 與頭像 (FA)
+      const info = this.tables.get(tableId);
+      if (info) {
+        if (d.N !== undefined && d.N !== null) {
+          const dealerName = String(d.N).trim() || '-';
+          const rawAvatar  = d.FA || d.LA || '';
+          const avatarUrl  = (typeof rawAvatar === 'string' && rawAvatar.startsWith('http'))
+            ? rawAvatar : '';
+          if (dealerName !== '-') info.dealer = { name: dealerName, avatar: avatarUrl };
+        }
+      }
+
       // 從 List 建立牌路
       if (d.List && Array.isArray(d.List) && d.List.length > 0) {
         const info = this.tables.get(tableId);

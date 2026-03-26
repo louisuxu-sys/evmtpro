@@ -373,23 +373,49 @@ const QUICK_REPLY = {
   ]
 };
 
+// ===== 荷官照片 URL 幫助函式 =====
+function getDealerPhotoUrl(dealerName, avatarUrl) {
+  // 1. WS 直接提供 URL (FA/LA 欄位)
+  if (avatarUrl && avatarUrl.startsWith('http')) return avatarUrl;
+
+  // 2. 環境變數設定的 CDN 基底 URL (e.g. https://cdn.example.com/dealer/)
+  const base = process.env.DEALER_PHOTO_BASE_URL;
+  if (base && dealerName && dealerName !== '-') {
+    const encoded = encodeURIComponent(dealerName.trim());
+    return `${base.replace(/\/$/, '')}/${encoded}.jpg`;
+  }
+
+  // 3. 用名字生成字母頭像 (ui-avatars.com，支援中文)
+  if (dealerName && dealerName !== '-') {
+    // 取第一個字（中英文均可）作為頭像字
+    const initial = [...dealerName.trim()][0] || '?';
+    const encoded = encodeURIComponent(initial);
+    return `https://ui-avatars.com/api/?name=${encoded}&background=1a3a5c&color=ffffff&size=200&bold=true&font-size=0.6`;
+  }
+
+  // 4. 純色預設
+  return 'https://ui-avatars.com/api/?name=?&background=888888&color=ffffff&size=200';
+}
+
 // ===== 單一房間卡片 (用於 Carousel) =====
 function buildRoomBubble(lid, engine, mtInfo) {
-  const tableName = (mtInfo && mtInfo.tableName) || engine.tableName;
   const displayNum = (mtInfo && mtInfo.displayNum) != null
     ? String(mtInfo.displayNum)
     : String(lid);
-  const dealer = (mtInfo && mtInfo.dealer && mtInfo.dealer.name) || engine.dealer || '-';
-  const summary = mtInfo && mtInfo.summary;
-  const roadText = (mtInfo && mtInfo.roadText) || '';
+  const dealerName = (mtInfo && mtInfo.dealer && mtInfo.dealer.name) || engine.dealer || '-';
+  const avatarUrl  = (mtInfo && mtInfo.dealer && mtInfo.dealer.avatar) || '';
+  const summary    = mtInfo && mtInfo.summary;
+  const roadText   = (mtInfo && mtInfo.roadText) || '';
+
+  const photoUrl = getDealerPhotoUrl(dealerName, avatarUrl);
 
   const total = summary ? summary.total : 0;
   const statsText = total > 0
     ? `莊${summary.banker} 閒${summary.player} 和${summary.tie}  共${total}局`
     : '等待資料...';
 
-  // 迷你路（最後 12 手）
-  const recent = roadText.slice(-12);
+  // 迷你路（最後 10 手）
+  const recent = roadText.slice(-10);
   const miniRoad = recent.split('').map(c => {
     if (c === '莊') return { type: 'text', text: '●', color: COLOR_B, size: 'xs', flex: 0 };
     if (c === '閒') return { type: 'text', text: '●', color: COLOR_P, size: 'xs', flex: 0 };
@@ -398,12 +424,21 @@ function buildRoomBubble(lid, engine, mtInfo) {
 
   return {
     type: 'bubble',
-    size: 'nano',
+    size: 'micro',
+    hero: {
+      type: 'image',
+      url: photoUrl,
+      size: 'full',
+      aspectMode: 'cover',
+      aspectRatio: '4:3',
+      action: { type: 'message', text: displayNum, label: '跟隨' }
+    },
     header: {
-      type: 'box', layout: 'vertical', backgroundColor: COLOR_HEADER, paddingAll: 'sm',
+      type: 'box', layout: 'vertical', backgroundColor: COLOR_HEADER,
+      paddingTop: 'xs', paddingBottom: 'xs', paddingAll: 'sm',
       contents: [
         { type: 'text', text: `百家樂 ${displayNum}`, color: '#ffffff', weight: 'bold', size: 'sm', align: 'center' },
-        { type: 'text', text: dealer !== '-' ? `👤 ${dealer}` : '👤 未知荷官', color: '#aaccff', size: 'xs', align: 'center' }
+        { type: 'text', text: dealerName !== '-' ? dealerName : '未知荷官', color: '#aaccff', size: 'xs', align: 'center' }
       ]
     },
     body: {
@@ -411,7 +446,7 @@ function buildRoomBubble(lid, engine, mtInfo) {
       contents: [
         { type: 'text', text: statsText, size: 'xs', color: '#555555', wrap: true },
         miniRoad.length > 0
-          ? { type: 'box', layout: 'horizontal', spacing: 'none', margin: 'xs', contents: miniRoad.slice(0, 10) }
+          ? { type: 'box', layout: 'horizontal', spacing: 'none', margin: 'xs', contents: miniRoad }
           : { type: 'text', text: '（暫無路紙）', size: 'xxs', color: '#aaaaaa' }
       ]
     },
