@@ -1460,11 +1460,11 @@ class MTConnector extends EventEmitter {
     if (code.length < 2) return null;
     const suitChar = code[code.length - 1].toUpperCase();
     const rankStr = code.substring(0, code.length - 1).toUpperCase();
-    // C=Carreau(♦), T=Trèfle(♣), D=♣(fallback), S=♠, H=♥
-    const suitMap = { 'S': 's', 'H': 'h', 'C': 'd', 'D': 'c', 'T': 'c' };
+    // 標準英式花色: S=♠  H=♥  C=♣  D=♦  (T 為備用 fallback)
+    const suitMap = { 'S': 's', 'H': 'h', 'C': 'c', 'D': 'd', 'T': 'c' };
     const rankMap = { 'A': 1, 'J': 11, 'Q': 12, 'K': 13 };
     const suit = suitMap[suitChar];
-    if (!suit) { console.warn(`⚠️ 未知花色字元: "${suitChar}" in "${codeStr}"`); return null; }
+    if (!suit) { console.warn(`⚠️ 未知花色字元: "${suitChar}" in "${codeStr}" (原始: ${JSON.stringify(codeStr)})`); return null; }
     const rank = rankMap[rankStr] || parseInt(rankStr);
     if (!rank || rank < 1 || rank > 13) return null;
     return { rank, suit };
@@ -1477,6 +1477,8 @@ class MTConnector extends EventEmitter {
 
     // 優先使用新格式 P1C/P2C/P3C/B1C/B2C/B3C ("7D-hash" 編碼)
     if (d.P1C !== undefined || d.B1C !== undefined) {
+      // 記錄原始牌碼供花色除錯（每局都印）
+      console.log(`🔍 RAW P1C="${d.P1C}" P2C="${d.P2C}" P3C="${d.P3C}" B1C="${d.B1C}" B2C="${d.B2C}" B3C="${d.B3C}"`);
       const p1 = this._decodeDDCard(d.P1C);
       const p2 = this._decodeDDCard(d.P2C);
       const p3 = this._decodeDDCard(d.P3C);
@@ -1576,9 +1578,9 @@ class MTConnector extends EventEmitter {
         return { rank: parseInt(parts[0]) || 0, suit: 's' };
       }
     }
-    // 如果是陣列 [花色, 點數]
+    // 如果是陣列 [花色索引, 點數] — 平台索引: 0=♠ 1=♥ 2=♦ 3=♣
     if (Array.isArray(c) && c.length >= 2) {
-      const suits = ['s', 'h', 'c', 'd'];
+      const suits = ['s', 'h', 'd', 'c'];  // 2=♦(方塊), 3=♣(梅花)
       return { rank: parseInt(c[1]) || 0, suit: suits[parseInt(c[0])] || 's' };
     }
     return null;
