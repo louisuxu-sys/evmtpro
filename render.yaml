@@ -14,5 +14,9 @@ services:
         sync: false
       - key: ADMIN_KEY
         sync: false
+      - key: MT_MODE
+        value: passive
+      - key: INGEST_API_KEY
+        sync: false
       - key: MT_PAGE_URL
         value: https://gsa.ofalive99.net

@@ -1,0 +1,16 @@
+{
+  "name": "mt-local-interceptor",
+  "version": "1.0.0",
+  "description": "MT平台本地WS攔截器 - 登入MT並將資料推送到Render後端",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "dotenv": "^16.3.1",
+    "puppeteer": "^21.0.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  }
+}

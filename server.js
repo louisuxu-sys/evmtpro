@@ -655,39 +655,64 @@ app.post('/admin/navigate', checkAdmin, express.json(), async (req, res) => {
   }
 });
 
-// 接收瀏覽器擴充功能轉發的 MT WebSocket 訊息
+// 接收本地攔截器 / 瀏覽器擴充功能轉發的 MT WebSocket 訊息
+const INGEST_API_KEY = process.env.INGEST_API_KEY || '';
+
 app.post('/api/mt/ingest', (req, res) => {
   try {
-    const { wsUrl, timestamp, data } = req.body || {};
-    if (!data) return res.json({ ok: true, skipped: 'no data' });
-
-    let msg;
-    try {
-      msg = typeof data === 'string' ? JSON.parse(data) : data;
-    } catch (parseErr) {
-      // 非 JSON 訊息直接跳過（不回 400）
-      return res.json({ ok: true, skipped: 'not json' });
+    // API 金鑰驗證（設定後才檢查）
+    if (INGEST_API_KEY) {
+      const key = req.headers['x-api-key'] || req.query.key;
+      if (key !== INGEST_API_KEY) return res.status(403).json({ error: 'Unauthorized' });
     }
 
-    // 記錄到訊息日誌
-    if (mtConnector.logMessages) {
-      mtConnector.messageLog.push({ time: new Date(timestamp || Date.now()).toISOString(), msg });
-      if (mtConnector.messageLog.length > 500) mtConnector.messageLog.shift();
+    const body = req.body;
+    if (!body) return res.json({ ok: true, skipped: 'no body' });
+
+    // 支援兩種格式:
+    // 1. 批次格式 (本地攔截器): [ { D, SI, C, ... }, ... ]
+    // 2. 單筆格式 (舊擴充功能): { wsUrl, timestamp, data }
+    let msgs = [];
+
+    if (Array.isArray(body)) {
+      // 批次格式
+      msgs = body.filter(m => m && typeof m === 'object');
+    } else if (body.D && body.SI) {
+      // 直接單筆 DD 格式
+      msgs = [body];
+    } else if (body.data) {
+      // 舊擴充功能格式
+      try {
+        const m = typeof body.data === 'string' ? JSON.parse(body.data) : body.data;
+        if (m) msgs = [m];
+      } catch (e) {
+        return res.json({ ok: true, skipped: 'not json' });
+      }
     }
 
-    // 標記為已連線（透過瀏覽器攔截）
+    if (msgs.length === 0) return res.json({ ok: true, skipped: 'no messages' });
+
+    // 標記為已連線
     if (!mtConnector.connected) {
       mtConnector.connected = true;
-      console.log('✅ MT連線器: 透過瀏覽器擴充功能接收資料');
-      broadcastWS({ type: 'mt_status', connected: true, mode: 'extension' });
+      console.log('✅ MT連線器: 透過本地攔截器接收資料');
+      broadcastWS({ type: 'mt_status', connected: true, mode: 'interceptor' });
     }
 
-    // 使用現有的訊息處理邏輯
-    mtConnector.handleMessage(msg);
+    let processed = 0;
+    for (const msg of msgs) {
+      try {
+        if (mtConnector.logMessages) {
+          mtConnector.messageLog.push({ time: new Date().toISOString(), msg });
+          if (mtConnector.messageLog.length > 500) mtConnector.messageLog.shift();
+        }
+        mtConnector.handleMessage(msg);
+        processed++;
+      } catch (e) {}
+    }
 
-    res.json({ ok: true });
+    res.json({ ok: true, processed });
   } catch (err) {
-    // 任何錯誤都回 200 避免擴充功能報錯
     res.json({ ok: false, error: err.message });
   }
 });
@@ -731,9 +756,12 @@ server.listen(PORT, () => {
   console.log(`🔌 MT連線: ${mtConnector.pageUrl}`);
   console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
 
-  // 自動登入或等待擴充功能
   console.log(`🔑 管理員介面: /admin/login?key=${ADMIN_KEY}`);
-  if (process.env.MT_CASINO_USERNAME && process.env.MT_CASINO_PASSWORD) {
+  const isPassive = process.env.MT_MODE === 'passive';
+  if (isPassive) {
+    console.log('📡 被動模式: 等待本地攔截器推送資料到 /api/mt/ingest');
+    console.log(`🔑 INGEST_API_KEY: ${INGEST_API_KEY ? '已設定' : '未設定 (任何人可存取)'}`);
+  } else if (process.env.MT_CASINO_USERNAME && process.env.MT_CASINO_PASSWORD) {
     console.log('🤖 偵測到自動登入設定，啟動自動登入...');
     mtConnector.autoLogin().then(ok => {
       if (ok) console.log('🎉 自動登入成功！系統已開始監控');
