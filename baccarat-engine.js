@@ -138,69 +138,148 @@ class BaccaratEngine {
     return cards.map(c => BaccaratEngine.formatCard(c)).join(' ');
   }
 
-  // 計算 EV (期望值)
+  // 計算 EV (期望值) — Griffin 逐張計數 + 歷史牌型分析
   calculateEV() {
     if (this.totalCards < 6) {
       return { banker: 0, player: 0, tie: 0, bankerEdge: 0, playerEdge: 0 };
     }
 
-    // 基於剩餘牌組的概率計算
     const remaining = this.totalCards;
     const shoe = this.shoe;
 
-    // 基礎機率 (8副牌標準)
-    // 莊贏: 45.86%, 閒贏: 44.62%, 和: 9.52%
-    const baseBankerProb = 0.4586;
-    const basePlayerProb = 0.4462;
-    const baseTieProb = 0.0952;
+    // 8副牌標準初始數量
+    const STD = { 0: 128, 1: 32, 2: 32, 3: 32, 4: 32, 5: 32, 6: 32, 7: 32, 8: 32, 9: 32 };
 
-    // 根據剩餘牌組調整機率
-    // 高牌(6-9)多有利於莊，低牌(1-5)多有利於閒
-    let highCards = 0;
-    let lowCards = 0;
-    for (let i = 1; i <= 5; i++) highCards += shoe[i] || 0;
-    for (let i = 6; i <= 9; i++) lowCards += shoe[i] || 0;
-    const zeroCards = shoe[0] || 0;
+    // 基礎機率（8副牌精確值）
+    // 莊: 45.8597%  閒: 44.6247%  和: 9.5156%
+    let bankerProb = 0.458597;
+    let playerProb = 0.446247;
+    let tieProb    = 0.095156;
 
-    const highRatio = remaining > 0 ? highCards / remaining : 0;
-    const lowRatio = remaining > 0 ? lowCards / remaining : 0;
-    const zeroRatio = remaining > 0 ? zeroCards / remaining : 0;
+    // ── Griffin 計數系統 ──
+    // 每張牌移出後對莊家優勢的影響（正=對莊有利, 負=對閒有利）
+    // 來源：Griffin 百家樂計數研究 / 牌靴滲透理論
+    const BANKER_EFFECT = {
+      0: -1,   // 10/J/Q/K：偏向閒
+      1: +4,   // A：對莊顯著有利（第三張牌規則）
+      2: +3,   // 2
+      3: +2,   // 3
+      4: -5,   // 4：移除後大幅減少莊優勢（最關鍵牌）
+      5: -4,   // 5
+      6: +4,   // 6：移除後對莊有利
+      7: +3,   // 7
+      8: -3,   // 8：對閒有利
+      9: -2    // 9
+    };
 
-    // 調整因子
-    const adjustment = (lowRatio - highRatio) * 0.15;
-    const tieAdjustment = (zeroRatio - 128 / 416) * 0.08;
+    // 計算 Running Count（已移除牌的加權總和）
+    let runningCount = 0;
+    for (let v = 0; v <= 9; v++) {
+      const removed = STD[v] - (shoe[v] || 0);
+      if (removed > 0) runningCount += removed * BANKER_EFFECT[v];
+    }
 
-    let bankerProb = baseBankerProb + adjustment;
-    let playerProb = basePlayerProb - adjustment;
-    let tieProb = baseTieProb + tieAdjustment;
+    // True Count = Running Count ÷ 剩餘牌靴數
+    const remainingDecks = remaining / 52;
+    const trueCount = remainingDecks > 0 ? runningCount / remainingDecks : 0;
 
-    // 正規化
-    const total = bankerProb + playerProb + tieProb;
-    bankerProb /= total;
-    playerProb /= total;
-    tieProb /= total;
+    // 調整機率（每個 true count 單位影響 0.0007）
+    const adjust = trueCount * 0.0007;
+    bankerProb += adjust;
+    playerProb -= adjust * 0.8;
+    tieProb    -= adjust * 0.2;
 
-    // EV 計算（考慮賠率）
-    // 莊贏賠率 0.95 (扣5%佣金), 閒贏賠率 1.0, 和賠率 8.0
-    const bankerEV = bankerProb * 0.95 - playerProb - tieProb;
-    const playerEV = playerProb - bankerProb - tieProb;
-    const tieEV = tieProb * 8 - bankerProb - playerProb;
+    // ── 歷史所有牌型分析 ──
+    const histBias = this._analyzeHistoricalCards();
+    bankerProb += histBias.bankerBias;
+    playerProb += histBias.playerBias;
 
-    // 莊/閒的優勢差
-    const bankerEdge = (bankerProb * 0.95 - (1 - bankerProb));
-    const playerEdge = (playerProb - (1 - playerProb));
+    // ── 近期走勢偏差（最近 40 手）──
+    if (this.history.length >= 15) {
+      const recent = this.history.slice(-40).filter(h => h !== 'T');
+      if (recent.length >= 10) {
+        const recentB = recent.filter(h => h === 'B').length / recent.length;
+        const expectedB = 0.458597 / (0.458597 + 0.446247); // ≈ 0.507
+        // 輕微回歸均值修正（趨勢反轉理論）
+        const trendAdj = (recentB - expectedB) * 0.015;
+        bankerProb -= trendAdj;
+        playerProb += trendAdj;
+      }
+    }
+
+    // 夾限 + 正規化
+    bankerProb = Math.max(0.40, Math.min(0.53, bankerProb));
+    playerProb = Math.max(0.38, Math.min(0.51, playerProb));
+    tieProb    = Math.max(0.07, Math.min(0.14, tieProb));
+    const tot = bankerProb + playerProb + tieProb;
+    bankerProb /= tot;
+    playerProb /= tot;
+    tieProb    /= tot;
+
+    // ── 正確 EV 公式 ──
+    // 和局在莊/閒注中算 PUSH（退還本金），不是輸
+    // 莊：贏賠 0.95（扣 5% 佣金），輸賠 -1，和 = 0
+    // 閒：贏賠 1.0，輸賠 -1，和 = 0
+    const bankerEV = bankerProb * 0.95 - playerProb;  // tie = push (×0)
+    const playerEV = playerProb          - bankerProb; // tie = push (×0)
+    const tieEV    = tieProb * 8         - (1 - tieProb); // 和注：贏賠8，不中賠-1
+
+    const penetration = parseFloat(((1 - remaining / 416) * 100).toFixed(1));
 
     return {
-      banker: parseFloat(bankerEV.toFixed(6)),
-      player: parseFloat(playerEV.toFixed(6)),
-      tie: parseFloat(tieEV.toFixed(6)),
-      bankerProb: parseFloat((bankerProb * 100).toFixed(2)),
-      playerProb: parseFloat((playerProb * 100).toFixed(2)),
-      tieProb: parseFloat((tieProb * 100).toFixed(2)),
-      bankerEdge: parseFloat(bankerEdge.toFixed(6)),
-      playerEdge: parseFloat(playerEdge.toFixed(6)),
-      remainingCards: this.totalCards,
+      banker:       parseFloat(bankerEV.toFixed(6)),
+      player:       parseFloat(playerEV.toFixed(6)),
+      tie:          parseFloat(tieEV.toFixed(6)),
+      bankerProb:   parseFloat((bankerProb * 100).toFixed(2)),
+      playerProb:   parseFloat((playerProb * 100).toFixed(2)),
+      tieProb:      parseFloat((tieProb * 100).toFixed(2)),
+      bankerEdge:   parseFloat((bankerProb - playerProb).toFixed(6)),
+      playerEdge:   parseFloat((playerProb - bankerProb).toFixed(6)),
+      remainingCards: remaining,
+      penetration,
       handCount: this.handCount
+    };
+  }
+
+  // 分析歷史所有牌型，對剩餘牌靴做偏差修正
+  _analyzeHistoricalCards() {
+    const details = this.handDetails.filter(
+      d => d.playerCards && d.playerCards.length >= 2 &&
+           d.bankerCards  && d.bankerCards.length  >= 2
+    );
+    if (details.length < 5) return { bankerBias: 0, playerBias: 0 };
+
+    // 統計歷史出牌分佈
+    const seen = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0, 9: 0 };
+    let total = 0;
+    for (const d of details) {
+      for (const card of [...d.playerCards, ...d.bankerCards]) {
+        const v = this._cardValue(card.rank);
+        seen[v]++;
+        total++;
+      }
+    }
+    if (total === 0) return { bankerBias: 0, playerBias: 0 };
+
+    // 標準出牌頻率
+    const stdFreq = { 0: 128/416, 1: 32/416, 2: 32/416, 3: 32/416,
+                      4: 32/416, 5: 32/416, 6: 32/416, 7: 32/416, 8: 32/416, 9: 32/416 };
+
+    // Griffin 效果（同 calculateEV 中）
+    const BANKER_EFFECT = { 0:-1, 1:4, 2:3, 3:2, 4:-5, 5:-4, 6:4, 7:3, 8:-3, 9:-2 };
+
+    // 若某張牌在歷史中出現頻率偏高 → 剩餘牌靴中偏少 → 反向修正
+    let bankerBias = 0;
+    for (let v = 0; v <= 9; v++) {
+      const actualFreq  = seen[v] / total;
+      const deviation   = actualFreq - stdFreq[v]; // 正=歷史偏多 → 剩餘偏少
+      // 歷史多 → 剩餘少 → 對莊的效果與 BANKER_EFFECT 反向
+      bankerBias -= deviation * BANKER_EFFECT[v] * 0.004;
+    }
+
+    return {
+      bankerBias: Math.max(-0.025, Math.min(0.025, bankerBias)),
+      playerBias: Math.max(-0.025, Math.min(0.025, -bankerBias))
     };
   }
 
