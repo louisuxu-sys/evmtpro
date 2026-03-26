@@ -1338,8 +1338,10 @@ class MTConnector extends EventEmitter {
 
         // 首次建立時，把 List 歷史路全部重播進 engine（讓珠盤路/大路有完整資料）
         if (d.List && Array.isArray(d.List) && d.List.length > 0) {
+          // 記錄首個 G 值樣本
+          if (d.List[0] && !this._gLogged) { this._gLogged = true; console.log(`📊 List G樣本: ${JSON.stringify(d.List.slice(0,3).map(r=>r.G))}`); }
           for (const round of d.List) {
-            const w = round.G === 'B' ? 'B' : round.G === 'P' ? 'P' : 'T';
+            const w = this._normalizeG(round.G);
             this.emit('game_result', {
               tableId,
               winner: w,
@@ -1382,8 +1384,9 @@ class MTConnector extends EventEmitter {
         // 建牌路文字：最後 30 局
         const recent = d.List.slice(-30);
         const roadText = recent.map(r => {
-          if (r.G === 'B') return '莊';
-          if (r.G === 'P') return '閒';
+          const g = this._normalizeG(r.G);
+          if (g === 'B') return '莊';
+          if (g === 'P') return '閒';
           return '和';
         }).join('');
         if (info) info.roadText = roadText;
@@ -1418,7 +1421,7 @@ class MTConnector extends EventEmitter {
   // 處理 DD 單局結果
   _processDDRound(tableId, round, summary) {
     if (!round) return;
-    const winner = round.G === 'B' ? 'B' : round.G === 'P' ? 'P' : 'T';
+    const winner = this._normalizeG(round.G);
     // 沒有牌面資料，但仍然發出 game_result（讓 EV 計算繼續）
     this.emit('game_result', {
       tableId,
@@ -1434,7 +1437,21 @@ class MTConnector extends EventEmitter {
     });
   }
 
-  // 解碼 DD 牌面字串: "7D-hash" → { rank:7, suit:'d' } / "KH-..." → { rank:13, suit:'h' }
+  // 正規化 G 欄位 (B/P/T, Z=莊, X/F=閒, H/0=和, 數字)
+  _normalizeG(g) {
+    if (g === null || g === undefined) return 'T';
+    const s = String(g).trim().toUpperCase();
+    if (s === 'B' || s === 'Z' || s === '1') return 'B'; // 莊
+    if (s === 'P' || s === 'X' || s === 'F' || s === '2') return 'P'; // 閒
+    if (s === 'T' || s === 'H' || s === '0' || s === '3') return 'T'; // 和
+    // 首次見到未知 G 值就記錄
+    if (!this._unknownG) this._unknownG = new Set();
+    if (!this._unknownG.has(s)) { this._unknownG.add(s); console.warn(`⚠️ 未知 G 值: "${s}" (原始: ${JSON.stringify(g)})`); }
+    return 'T';
+  }
+
+  // 解碼 DD 牌面字串: 支援 "7H-hash"(標準) 與 "7C-hash"(法式 Carreau=♦)
+  // 平台花色對應: S=♠  H=♥  C=♦(Carreau)  T=♣(Trèfle)  D=♣(fallback)
   _decodeDDCard(codeStr) {
     if (!codeStr || typeof codeStr !== 'string') return null;
     if (codeStr.startsWith('**') || codeStr.startsWith('*')) return null;
@@ -1443,10 +1460,11 @@ class MTConnector extends EventEmitter {
     if (code.length < 2) return null;
     const suitChar = code[code.length - 1].toUpperCase();
     const rankStr = code.substring(0, code.length - 1).toUpperCase();
-    const suitMap = { 'S': 's', 'H': 'h', 'C': 'c', 'D': 'd' };
+    // C=Carreau(♦), T=Trèfle(♣), D=♣(fallback), S=♠, H=♥
+    const suitMap = { 'S': 's', 'H': 'h', 'C': 'd', 'D': 'c', 'T': 'c' };
     const rankMap = { 'A': 1, 'J': 11, 'Q': 12, 'K': 13 };
     const suit = suitMap[suitChar];
-    if (!suit) return null;
+    if (!suit) { console.warn(`⚠️ 未知花色字元: "${suitChar}" in "${codeStr}"`); return null; }
     const rank = rankMap[rankStr] || parseInt(rankStr);
     if (!rank || rank < 1 || rank > 13) return null;
     return { rank, suit };
@@ -1473,7 +1491,10 @@ class MTConnector extends EventEmitter {
         const bacVal = r => (r >= 10 ? 0 : r);
         const playerTotal = playerCards.reduce((s, c) => (s + bacVal(c.rank)) % 10, 0);
         const bankerTotal = bankerCards.reduce((s, c) => (s + bacVal(c.rank)) % 10, 0);
-        const winner = d.WF === 'B' ? 'B' : d.WF === 'P' ? 'P' : 'T';
+        // 從牌面計算勝負（比 WF 欄位更可靠）
+        const winner = playerTotal === bankerTotal ? 'T' : bankerTotal > playerTotal ? 'B' : 'P';
+        // 記錄 WF 值供除錯
+        if (d.WF !== undefined && !this._wfLogged) { this._wfLogged = true; console.log(`📊 WF樣本: "${d.WF}" | computed=${winner}`); }
         const roundNum = d.A || d.I || null;
         const _fmt = c => { const s={s:'♠',h:'♥',c:'♣',d:'♦'},r={1:'A',11:'J',12:'Q',13:'K'}; return `${s[c.suit]||'?'}${r[c.rank]||c.rank}`; };
         console.log(`🃏 DD開牌: ${tableId} 第${roundNum}局 ` +
