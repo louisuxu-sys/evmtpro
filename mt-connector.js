@@ -1460,8 +1460,8 @@ class MTConnector extends EventEmitter {
     if (code.length < 2) return null;
     const suitChar = code[code.length - 1].toUpperCase();
     const rankStr = code.substring(0, code.length - 1).toUpperCase();
-    // 標準英式花色: S=♠  H=♥  C=♣  D=♦  (T 為備用 fallback)
-    const suitMap = { 'S': 's', 'H': 'h', 'C': 'c', 'D': 'd', 'T': 'c' };
+    // 平台花色對應: C=♦  D=♣  S=♠  H=♥  T=♣(fallback)
+    const suitMap = { 'S': 's', 'H': 'h', 'C': 'd', 'D': 'c', 'T': 'c' };
     const rankMap = { 'A': 1, 'J': 11, 'Q': 12, 'K': 13 };
     const suit = suitMap[suitChar];
     if (!suit) { console.warn(`⚠️ 未知花色字元: "${suitChar}" in "${codeStr}" (原始: ${JSON.stringify(codeStr)})`); return null; }
