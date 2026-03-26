@@ -1377,12 +1377,17 @@ class MTConnector extends EventEmitter {
         }).join('');
         if (info) info.roadText = roadText;
 
-        // 追蹤最新局號
+        // 追蹤最新局號（A 欄位可能為 0/null/undefined，以多欄位或 list 長度作為識別）
         const lastRound = d.List[d.List.length - 1];
         if (!this._lastRound) this._lastRound = {};
         const lastA = this._lastRound[tableId];
-        if (lastRound.A && lastRound.A !== lastA) {
-          this._lastRound[tableId] = lastRound.A;
+        const roundKey = lastRound.A != null ? lastRound.A
+                       : lastRound.N != null ? lastRound.N
+                       : lastRound.R != null ? lastRound.R
+                       : lastRound.I != null ? lastRound.I
+                       : `len_${d.List.length}`;
+        if (roundKey !== lastA) {
+          this._lastRound[tableId] = roundKey;
           // 只在沒有實際牌碼時才由 List 觸發（避免與下方 FullResult 重複發送）
           const hasRealCardNow = (d.P1C && typeof d.P1C === 'string' && !d.P1C.startsWith('**')) ||
                                  (d.B1C && typeof d.B1C === 'string' && !d.B1C.startsWith('**'));
