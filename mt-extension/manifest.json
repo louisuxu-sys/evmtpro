@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "百家之眼 - MT 攔截器",
+  "version": "1.0",
+  "description": "攔截 MT 平台 WebSocket 訊息",
+  "permissions": [],
+  "host_permissions": ["https://evmtpro.onrender.com/*"],
+  "content_scripts": [
+    {
+      "matches": ["*://*.ofalive99.net/*", "*://*.rbjork1914.com/*", "*://*.seogrwin1688.com/*"],
+      "js": ["inject.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    }
+  ]
+}
