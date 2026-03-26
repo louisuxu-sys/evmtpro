@@ -324,12 +324,7 @@ function buildHandResultFlex(engine, mtInfo, detail) {
             ]
           },
           hasCards ? buildColoredCardRow('閒', detail.playerCards) : null,
-          hasCards ? buildColoredCardRow('莊', detail.bankerCards) : null,
-          // 近期 10 手路
-          beadRoad.slice(-10).length > 0 ? {
-            type: 'box', layout: 'horizontal', spacing: 'xs', margin: 'xs',
-            contents: beadRoad.slice(-10).map(b => circleBox(b.result, '20px'))
-          } : null,
+          hasCards ? buildColoredCardRow('\u838a', detail.bankerCards) : null,
           { type: 'separator' },
           // 下手預測
           {
@@ -461,17 +456,14 @@ function buildRoomBubble(lid, engine, mtInfo) {
       type: 'box', layout: 'vertical', backgroundColor: COLOR_HEADER,
       paddingTop: 'xs', paddingBottom: 'xs', paddingAll: 'sm',
       contents: [
-        { type: 'text', text: `百家樂 ${displayNum}`, color: '#ffffff', weight: 'bold', size: 'sm', align: 'center' },
-        { type: 'text', text: dealerName !== '-' ? dealerName : '未知荷官', color: '#aaccff', size: 'xs', align: 'center' }
+        { type: 'text', text: `百家樂 ${displayNum}`, color: '#ffffff', weight: 'bold', size: 'sm', align: 'center' }
       ]
     },
     body: {
       type: 'box', layout: 'vertical', spacing: 'xs', paddingAll: 'sm',
       contents: [
-        { type: 'text', text: statsText, size: 'xs', color: '#555555', wrap: true },
-        miniRoad.length > 0
-          ? { type: 'box', layout: 'horizontal', spacing: 'none', margin: 'xs', contents: miniRoad }
-          : { type: 'text', text: '（暫無路紙）', size: 'xxs', color: '#aaaaaa' }
+        { type: 'text', text: dealerName !== '-' ? dealerName : '—', size: 'sm', color: '#333333', align: 'center', weight: 'bold' },
+        { type: 'text', text: statsText, size: 'xs', color: '#555555', wrap: true, margin: 'xs' }
       ]
     },
     footer: {
