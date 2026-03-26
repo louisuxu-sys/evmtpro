@@ -30,25 +30,27 @@ function emptyCell(size) {
 // ===== 珠盤路 (6 行，由上到下填滿每欄後再往右) =====
 function buildBeadRoadFlex(beadRoad) {
   const ROWS = 6;
-  const MAX_COLS = 12; // 最多顯示 72 筆
+  const MAX_COLS = 16; // 最多顯示 96 筆
+  const MIN_COLS = 12; // 固定寬度（避免 LINE 撐開格距）
+  const CELL = '16px';
   const recent = beadRoad.slice(-(ROWS * MAX_COLS));
 
   if (recent.length === 0) {
     return [{ type: 'text', text: '（無資料）', size: 'xs', color: '#aaaaaa' }];
   }
 
-  const totalCols = Math.ceil(recent.length / ROWS);
-  const showCols = Math.min(totalCols, MAX_COLS);
-  const startIdx = Math.max(0, recent.length - showCols * ROWS);
+  const dataCols = Math.ceil(recent.length / ROWS);
+  const totalCols = Math.max(dataCols, MIN_COLS);
+  const startIdx = recent.length - dataCols * ROWS; // 可能為負（最前欄不滿）
 
   const colBoxes = [];
-  for (let c = 0; c < showCols; c++) {
+  for (let c = 0; c < totalCols; c++) {
     const cells = [];
     for (let r = 0; r < ROWS; r++) {
       const idx = startIdx + c * ROWS + r;
-      cells.push(idx < recent.length ? circleBox(recent[idx].result, '22px') : emptyCell('22px'));
+      cells.push((idx >= 0 && idx < recent.length) ? circleBox(recent[idx].result, CELL) : emptyCell(CELL));
     }
-    colBoxes.push({ type: 'box', layout: 'vertical', spacing: 'xs', contents: cells });
+    colBoxes.push({ type: 'box', layout: 'vertical', flex: 0, spacing: 'xs', contents: cells });
   }
 
   return [{ type: 'box', layout: 'horizontal', spacing: 'xs', contents: colBoxes }];
@@ -56,8 +58,10 @@ function buildBeadRoadFlex(beadRoad) {
 
 // ===== 大路 (每欄向下疊加) =====
 function buildBigRoadFlex(bigRoad) {
-  const MAX_COLS = 12;
+  const MAX_COLS = 16;
+  const MIN_COLS = 12;
   const MAX_ROWS = 6;
+  const CELL = '16px';
 
   if (bigRoad.length === 0) {
     return [{ type: 'text', text: '（無資料）', size: 'xs', color: '#aaaaaa' }];
@@ -65,6 +69,7 @@ function buildBigRoadFlex(bigRoad) {
 
   const maxCol = Math.max(...bigRoad.map(e => e.col));
   const startCol = Math.max(0, maxCol - MAX_COLS + 1);
+  const totalCols = Math.max(maxCol - startCol + 1, MIN_COLS);
 
   // grid[c][r] = result
   const grid = {};
@@ -76,13 +81,13 @@ function buildBigRoadFlex(bigRoad) {
   }
 
   const colBoxes = [];
-  for (let c = 0; c < MAX_COLS; c++) {
+  for (let c = 0; c < totalCols; c++) {
     const cells = [];
     for (let r = 0; r < MAX_ROWS; r++) {
       const res = grid[c] && grid[c][r];
-      cells.push(res ? circleBox(res, '22px') : emptyCell('22px'));
+      cells.push(res ? circleBox(res, CELL) : emptyCell(CELL));
     }
-    colBoxes.push({ type: 'box', layout: 'vertical', spacing: 'xs', contents: cells });
+    colBoxes.push({ type: 'box', layout: 'vertical', flex: 0, spacing: 'xs', contents: cells });
   }
 
   return [{ type: 'box', layout: 'horizontal', spacing: 'xs', contents: colBoxes }];
