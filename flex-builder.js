@@ -280,7 +280,10 @@ function buildAnalysisFlex(engine, mtInfo, mode) {
 function buildHandResultFlex(engine, mtInfo, detail) {
   const state = engine.getState();
   const { stats, ev, history, beadRoad } = state;
-  const tableName = (mtInfo && mtInfo.tableName) || engine.tableName || `\u767e\u5bb6\u6a02 ${engine.tableId || '?'}`;
+  const _rawName = (mtInfo && mtInfo.tableName) || engine.tableName || '';
+  const tableName = (_rawName && _rawName.includes('\u767e\u5bb6\u6a02'))
+    ? _rawName
+    : `\u767e\u5bb6\u6a02 ${_rawName || (mtInfo && mtInfo.displayNum) || engine.tableId || '?'}`;
   const dealerName = (mtInfo && mtInfo.dealer && mtInfo.dealer.name && mtInfo.dealer.name !== '-') ? mtInfo.dealer.name : '\u8377\u5b98';
 
   const pred = predictNext(history, stats);
