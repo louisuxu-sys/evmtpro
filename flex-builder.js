@@ -280,7 +280,7 @@ function buildAnalysisFlex(engine, mtInfo, mode) {
 function buildHandResultFlex(engine, mtInfo, detail) {
   const state = engine.getState();
   const { stats, ev, history, beadRoad } = state;
-  const tableName = (mtInfo && mtInfo.tableName) || engine.tableName || `\u767e\u5bb6\u6a02 ${engine.localId || '?'}`;
+  const tableName = (mtInfo && mtInfo.tableName) || engine.tableName || `\u767e\u5bb6\u6a02 ${engine.tableId || '?'}`;
   const dealerName = (mtInfo && mtInfo.dealer && mtInfo.dealer.name && mtInfo.dealer.name !== '-') ? mtInfo.dealer.name : '\u8377\u5b98';
 
   const pred = predictNext(history, stats);
@@ -310,7 +310,7 @@ function buildHandResultFlex(engine, mtInfo, detail) {
         type: 'box', layout: 'horizontal', backgroundColor: COLOR_HEADER, paddingAll: 'sm',
         contents: [
           { type: 'text', text: tableName, color: '#ffffff', weight: 'bold', size: 'sm', flex: 2 },
-          { type: 'text', text: dealerName, color: '#aaccff', size: 'sm', flex: 1, align: 'end' }
+          { type: 'text', text: `\u8377\u5b98\uff1a${dealerName}`, color: '#aaccff', size: 'sm', flex: 1, align: 'end' }
         ]
       },
       body: {
