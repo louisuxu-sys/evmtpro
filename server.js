@@ -123,23 +123,17 @@ mtConnector.on('game_result', (data) => {
   }
 });
 
-// 推送開牌結果給跟隨用戶（每手推送完整分析 + 更新路盤）
+// 推送開牌結果給跟隨用戶（每手推送牌型結果）
 function pushToFollowers(mtTableId, localId, engine, ev, detail) {
   const mtInfo = mtConnector.tables.get(mtTableId);
   for (const [userId, info] of userFollowing) {
     if (info.mtTableId === mtTableId) {
       try {
-        const flex = buildAnalysisFlex(engine, mtInfo);
+        const flex = buildHandResultFlex(engine, mtInfo, detail);
         pushFlex(userId, flex);
       } catch (e) {
-        console.error('pushToFollowers flex error:', e.message);
-        try {
-          const flex2 = buildHandResultFlex(engine, mtInfo, detail);
-          pushFlex(userId, flex2);
-        } catch (e2) {
-          const msg = formatHandResult(localId, engine, ev, detail);
-          pushMessage(userId, msg);
-        }
+        const msg = formatHandResult(localId, engine, ev, detail);
+        pushMessage(userId, msg);
       }
     }
   }
