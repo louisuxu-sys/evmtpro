@@ -174,7 +174,7 @@ app.post('/webhook', express.raw({ type: '*/*' }), (req, res) => {
 // CORS - 允許 MT 平台瀏覽器攔截腳本跨域請求
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, x-api-key');
   if (req.method === 'OPTIONS') return res.sendStatus(200);
   next();
 });
