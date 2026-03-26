@@ -6,6 +6,7 @@ const path = require('path');
 const line = require('@line/bot-sdk');
 const BaccaratEngine = require('./baccarat-engine');
 const MTConnector = require('./mt-connector');
+const { buildAnalysisFlex, buildHandResultFlex } = require('./flex-builder');
 
 const app = express();
 const server = http.createServer(app);
@@ -110,10 +111,16 @@ mtConnector.on('game_result', (data) => {
 
 // 推送開牌結果給跟隨用戶
 function pushToFollowers(mtTableId, localId, engine, ev, detail) {
+  const mtInfo = mtConnector.tables.get(mtTableId);
   for (const [userId, info] of userFollowing) {
     if (info.mtTableId === mtTableId) {
-      const msg = formatHandResult(localId, engine, ev, detail);
-      pushMessage(userId, msg);
+      try {
+        const flex = buildHandResultFlex(engine, mtInfo, detail);
+        pushFlex(userId, flex);
+      } catch (e) {
+        const msg = formatHandResult(localId, engine, ev, detail);
+        pushMessage(userId, msg);
+      }
     }
   }
 }
@@ -229,19 +236,46 @@ async function handleLineEvent(event) {
       const engine = tables.get(targetLocalId);
       const mtId = localToMtMap.get(targetLocalId);
       userFollowing.set(targetId, { mtTableId: mtId, localId: targetLocalId });
-      const state = engine.getState();
-      await replyMessage(replyToken,
-        `✅ 已開始跟隨「${engine.tableName}」
-` +
-        `荷官: ${state.dealer || '-'}
-
-` +
-        `每手開牌會自動推送牌型及 EV 值
-輸入「取消」停止跟隨`
-      );
+      const mtInfo = mtId ? mtConnector.tables.get(mtId) : null;
+      try {
+        const flex = buildAnalysisFlex(engine, mtInfo);
+        await replyFlex(replyToken, flex);
+      } catch (e) {
+        console.error('Flex build error:', e.message);
+        const state = engine.getState();
+        await replyMessage(replyToken, `✅ 已開始跟隨「${engine.tableName}」\n荷官: ${state.dealer || '-'}\n\n每手開牌會自動推送\n輸入「取消」停止跟隨`);
+      }
     } else {
       await replyMessage(replyToken, `❌ 找不到「${inputKey}」房
 輸入「全廳」查看可用房間`);
+    }
+    return;
+  }
+
+  // ===== 查看分析 (分析X 或 分析B01) =====
+  const analyseMatch = text.match(/^分析([0-9B][0-9A-Za-z]*)$/);
+  if (analyseMatch) {
+    const inputKey = analyseMatch[1].toUpperCase();
+    let targetLocalId = null;
+    for (const [lid, eng] of tables) {
+      const mid = localToMtMap.get(lid);
+      const mi = mid ? mtConnector.tables.get(mid) : null;
+      const dnKey = mi ? String(mi.displayNum || '').toUpperCase() : '';
+      const tnKey = String(eng.tableName || '').replace(/^百家樂\s*/, '').toUpperCase();
+      if (dnKey === inputKey || tnKey === inputKey) { targetLocalId = lid; break; }
+    }
+    if (targetLocalId !== null) {
+      const engine = tables.get(targetLocalId);
+      const mtId = localToMtMap.get(targetLocalId);
+      const mtInfo = mtId ? mtConnector.tables.get(mtId) : null;
+      try {
+        const flex = buildAnalysisFlex(engine, mtInfo);
+        await replyFlex(replyToken, flex);
+      } catch (e) {
+        await replyMessage(replyToken, `❌ 分析建立失敗: ${e.message}`);
+      }
+    } else {
+      await replyMessage(replyToken, `❌ 找不到「${inputKey}」房\n輸入「全廳」查看可用房間`);
     }
     return;
   }
@@ -261,14 +295,11 @@ async function handleLineEvent(event) {
   // ===== 指令幫助 =====
   if (text === '指令' || text === '幫助' || text === 'help') {
     await replyMessage(replyToken,
-      `🎰 百家之眼 - 指令列表
-` +
-      `📊 全廳 - 查看所有百家樂房間
-` +
-      `   輸入房號跟隨，如: 2 或 B01
-` +
-      `❌ 取消 - 停止跟隨
-` +
+      `🎰 百家之眼 - 指令列表\n` +
+      `📊 全廳 - 查看所有百家樂房間\n` +
+      `🔢 輸入房號 - 跟隨房間，如: 2 或 B01\n` +
+      `🔍 分析X - 查看 AI 分析，如: 分析2 或 分析B01\n` +
+      `❌ 取消 - 停止跟隨\n` +
       `❓ 指令 - 顯示此幫助`
     );
     return;
@@ -285,17 +316,24 @@ async function replyMessage(replyToken, text) {
   if (!lineClient) { console.error('LINE client 未初始化'); return; }
   console.log('📤 嘗試回覆訊息, token:', replyToken.substring(0, 20) + '...');
   try {
-    const result = await lineClient.replyMessage({
-      replyToken,
-      messages: [{ type: 'text', text }]
-    });
+    await lineClient.replyMessage({ replyToken, messages: [{ type: 'text', text }] });
     console.log('✅ 回覆成功');
   } catch (err) {
     console.error('❌ LINE reply error:', err.message);
     if (err.statusCode) console.error('  Status:', err.statusCode);
     if (err.body) console.error('  Body:', JSON.stringify(err.body));
-    // 完整 error 輸出
-    console.error('  Full error:', JSON.stringify(err, Object.getOwnPropertyNames(err)).substring(0, 500));
+  }
+}
+
+// LINE 回覆 Flex Message
+async function replyFlex(replyToken, flex) {
+  if (!lineClient) { console.error('LINE client 未初始化'); return; }
+  try {
+    await lineClient.replyMessage({ replyToken, messages: [flex] });
+    console.log('✅ Flex 回覆成功');
+  } catch (err) {
+    console.error('❌ LINE flex reply error:', err.message);
+    if (err.body) console.error('  Body:', JSON.stringify(err.body));
   }
 }
 
@@ -303,12 +341,19 @@ async function replyMessage(replyToken, text) {
 async function pushMessage(targetId, text) {
   if (!lineClient) return;
   try {
-    await lineClient.pushMessage({
-      to: targetId,
-      messages: [{ type: 'text', text }]
-    });
+    await lineClient.pushMessage({ to: targetId, messages: [{ type: 'text', text }] });
   } catch (err) {
     console.error('LINE push error:', err.message);
+  }
+}
+
+// LINE 推送 Flex Message
+async function pushFlex(targetId, flex) {
+  if (!lineClient) return;
+  try {
+    await lineClient.pushMessage({ to: targetId, messages: [flex] });
+  } catch (err) {
+    console.error('LINE push flex error:', err.message);
   }
 }
 
