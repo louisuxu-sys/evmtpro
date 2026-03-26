@@ -221,6 +221,16 @@ function buildAnalysisFlex(engine, mtInfo, mode) {
   const bigRoad  = historyToBigRoad(liveHistory);
   const history  = liveHistory;
 
+  // \u82e5 engine \u7121\u6b77\u53f2\uff0c\u5f9e liveHistory \u88dc\u7b97\u7d71\u8a08
+  if (stats.banker + stats.player + stats.tie === 0 && liveHistory.length > 0) {
+    stats = { banker: 0, player: 0, tie: 0 };
+    for (const h of liveHistory) {
+      if (h === 'B') stats.banker++;
+      else if (h === 'P') stats.player++;
+      else if (h === 'T') stats.tie++;
+    }
+  }
+
   const _rawN = (mtInfo && mtInfo.tableName) || engine.tableName || '';
   const tableName = (_rawN && _rawN.includes('\u767e\u5bb6\u6a02')) ? _rawN : `\u767e\u5bb6\u6a02 ${_rawN || (mtInfo && mtInfo.displayNum) || engine.tableId || '?'}`;
   const total = stats.banker + stats.player + stats.tie;
