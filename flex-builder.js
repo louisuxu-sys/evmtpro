@@ -193,7 +193,8 @@ function buildAnalysisFlex(engine, mtInfo, mode) {
   const bigRoad  = historyToBigRoad(liveHistory);
   const history  = liveHistory;
 
-  const tableName = (mtInfo && mtInfo.tableName) || engine.tableName;
+  const _rawN = (mtInfo && mtInfo.tableName) || engine.tableName || '';
+  const tableName = (_rawN && _rawN.includes('\u767e\u5bb6\u6a02')) ? _rawN : `\u767e\u5bb6\u6a02 ${_rawN || (mtInfo && mtInfo.displayNum) || engine.tableId || '?'}`;
   const total = stats.banker + stats.player + stats.tie;
 
   const bPct = total > 0 ? (stats.banker / total * 100).toFixed(1) : '45.9';

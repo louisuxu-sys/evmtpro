@@ -58,6 +58,11 @@ mtConnector.on('tables_list', (mtTables) => {
       tables.set(localId, engine);
       mtTableIdMap.set(mt.tableId, localId);
       localToMtMap.set(localId, mt.tableId);
+      // 把 listHistory 直接灌進 engine（game_result 歷史事件在 engine 建立前就發出，會被丟棄）
+      if (mt.listHistory && mt.listHistory.length > 0) {
+        for (const winner of mt.listHistory) engine.recordHand(winner, [], []);
+        console.log(`  📜 歷史路載入: 第${localId}廳 ${mt.listHistory.length}局`);
+      }
       console.log(`  ✅ 第${localId}廳: ${mt.tableName} (荷官: ${mt.dealer?.name || '-'})`);
     } else {
       // 更新荷官
