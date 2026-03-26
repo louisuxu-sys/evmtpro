@@ -167,11 +167,31 @@ function getDerivedRoadStats(bigRoad) {
   };
 }
 
+// ===== 從 history 陣列直接建珠盤路/大路（供 mtInfo.listHistory 使用）=====
+function historyToBeadRoad(history) {
+  return history.map((h, i) => ({ index: i, result: h }));
+}
+function historyToBigRoad(history) {
+  const road = []; let col = 0, row = 0, last = null;
+  for (const h of history) {
+    if (h === 'T') { if (road.length > 0) road[road.length - 1].tie = true; continue; }
+    if (h !== last) { col = last === null ? 0 : col + 1; row = 0; } else row++;
+    road.push({ col, row, result: h, tie: false }); last = h;
+  }
+  return road;
+}
+
 // ===== 主函式：建立完整 Flex Message =====
 function buildAnalysisFlex(engine, mtInfo, mode) {
   mode = mode || '穩健跟進';
   const state = engine.getState();
-  const { history, stats, ev, beadRoad, bigRoad, totalCards } = state;
+  const { history: engineHistory, stats, ev, totalCards } = state;
+  // 優先用 WS 最新 List（最準確），fallback 用 engine 歷史
+  const liveHistory = (mtInfo && mtInfo.listHistory && mtInfo.listHistory.length > 0)
+    ? mtInfo.listHistory : engineHistory;
+  const beadRoad = historyToBeadRoad(liveHistory);
+  const bigRoad  = historyToBigRoad(liveHistory);
+  const history  = liveHistory;
 
   const tableName = (mtInfo && mtInfo.tableName) || engine.tableName;
   const total = stats.banker + stats.player + stats.tie;

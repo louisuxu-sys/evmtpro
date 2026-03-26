@@ -1381,6 +1381,8 @@ class MTConnector extends EventEmitter {
       // 從 List 建立牌路
       if (d.List && Array.isArray(d.List) && d.List.length > 0) {
         const info = this.tables.get(tableId);
+        // 正規化完整路史（每次更新）供 Flex 路盤直接使用
+        if (info) info.listHistory = d.List.map(r => this._normalizeG(r.G));
         // 建牌路文字：最後 30 局
         const recent = d.List.slice(-30);
         const roadText = recent.map(r => {
