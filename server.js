@@ -769,12 +769,21 @@ app.post('/api/mt/ingest', (req, res) => {
       // 直接單筆 DD 格式
       msgs = [body];
     } else if (body.data) {
-      // 舊擴充功能格式
+      // 舊擴充功能格式: { wsUrl, timestamp, data: "raw_ws_string" }
+      const raw = typeof body.data === 'string' ? body.data : JSON.stringify(body.data);
+      // 嘗試直接 JSON（DD 格式）
       try {
-        const m = typeof body.data === 'string' ? JSON.parse(body.data) : body.data;
-        if (m) msgs = [m];
+        const m = JSON.parse(raw);
+        if (m && typeof m === 'object') msgs = [m];
       } catch (e) {
-        return res.json({ ok: true, skipped: 'not json' });
+        // SignalR \x1e 分隔格式
+        const parts = raw.split('\x1e').filter(p => p.trim());
+        for (const part of parts) {
+          try {
+            const m = JSON.parse(part);
+            if (m && typeof m === 'object') msgs.push(m);
+          } catch (e2) {}
+        }
       }
     }
 

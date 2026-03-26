@@ -213,7 +213,8 @@ function historyToBigRoad(history) {
 function buildAnalysisFlex(engine, mtInfo, mode) {
   mode = mode || '穩健跟進';
   const state = engine.getState();
-  const { history: engineHistory, stats, ev, totalCards } = state;
+  const { history: engineHistory, ev, totalCards } = state;
+  let stats = state.stats;
   // 取較長的那份歷史（listHistory=WS快照 / engineHistory=即時累積）
   const liveHistory = (mtInfo && mtInfo.listHistory && mtInfo.listHistory.length >= engineHistory.length)
     ? mtInfo.listHistory : engineHistory;
