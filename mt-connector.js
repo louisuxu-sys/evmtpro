@@ -1630,6 +1630,13 @@ class MTConnector extends EventEmitter {
       }
       return;
     }
+
+    // ---- 通用 fallback: argument 本身是 DD 格式 ({ D, SI }) ----
+    for (const arg of args) {
+      if (arg && typeof arg === 'object' && arg.D && arg.SI) {
+        this.handleMessage(arg);
+      }
+    }
   }
 
   // SignalR: 處理牌桌列表
