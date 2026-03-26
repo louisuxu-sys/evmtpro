@@ -125,7 +125,7 @@ mtConnector.on('game_result', (data) => {
 
 // 每用戶推送冷卻（避免 LINE 429）
 const pushCooldown = new Map(); // userId -> lastPushTimestamp
-const PUSH_COOLDOWN_MS = 3000;
+const PUSH_COOLDOWN_MS = 10000;
 
 // 推送開牌結果給跟隨用戶（每手推送牌型結果）
 function pushToFollowers(mtTableId, localId, engine, ev, detail) {
@@ -382,14 +382,21 @@ async function pushMessage(targetId, text) {
   }
 }
 
-// LINE 推送 Flex Message
-async function pushFlex(targetId, flex) {
+// LINE 推送 Flex Message（429 自動重試一次）
+async function pushFlex(targetId, flex, _retry) {
   if (!lineClient) return;
   try {
     const msg = Object.assign({}, flex, { quickReply: QUICK_REPLY });
     await lineClient.pushMessage({ to: targetId, messages: [msg] });
   } catch (err) {
-    console.error('LINE push flex error:', err.message);
+    const code = err.statusCode || (err.message && parseInt(err.message));
+    const body = err.body ? JSON.stringify(err.body) : '';
+    if (code === 429 && !_retry) {
+      console.warn(`⚠️  LINE 429 Too Many Requests - retry in 12s (${body})`);
+      setTimeout(() => pushFlex(targetId, flex, true), 12000);
+    } else {
+      console.error(`LINE push flex error: ${code} - ${err.message} ${body}`);
+    }
   }
 }
 
