@@ -1580,7 +1580,7 @@ class MTConnector extends EventEmitter {
     }
     // 如果是陣列 [花色索引, 點數] — 平台索引: 0=♠ 1=♥ 2=♦ 3=♣
     if (Array.isArray(c) && c.length >= 2) {
-      const suits = ['s', 'h', 'd', 'c'];  // 2=♦(方塊), 3=♣(梅花)
+      const suits = ['s', 'h', 'c', 'd'];  // 2=♣(\u6885\u82b1), 3=♦(\u65b9\u584a) \u2014\u6a19\u6e96\u7d22\u5f15
       return { rank: parseInt(c[1]) || 0, suit: suits[parseInt(c[0])] || 's' };
     }
     return null;
