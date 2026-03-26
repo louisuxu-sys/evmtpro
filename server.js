@@ -103,10 +103,14 @@ mtConnector.on('game_result', (data) => {
   // 廣播到前端
   broadcastWS({ type: 'update', tableId: localId, state });
 
-  // 推送給跟隨此房間的 LINE 用戶
-  pushToFollowers(data.tableId, localId, engine, ev, lastDetail);
+  // 推送給跟隨此房間的 LINE 用戶（歷史重播不推送）
+  if (!data.isHistory) {
+    pushToFollowers(data.tableId, localId, engine, ev, lastDetail);
+  }
 
-  console.log(`✅ 第${localId}廳 ${engine.tableName} 第${engine.handCount}局`);
+  if (!data.isHistory) {
+    console.log(`✅ 第${localId}廳 ${engine.tableName} 第${engine.handCount}局`);
+  }
 });
 
 // 推送開牌結果給跟隨用戶

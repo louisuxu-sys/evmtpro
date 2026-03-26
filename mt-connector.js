@@ -1335,6 +1335,23 @@ class MTConnector extends EventEmitter {
         };
         this.tables.set(tableId, info);
         console.log(`📋 房間 ${displayNum} (${tableId}) 共${summary.Total}局 莊${summary.Banker} 閒${summary.Player} 和${summary.Tie}`);
+
+        // 首次建立時，把 List 歷史路全部重播進 engine（讓珠盤路/大路有完整資料）
+        if (d.List && Array.isArray(d.List) && d.List.length > 0) {
+          for (const round of d.List) {
+            const w = round.G === 'B' ? 'B' : round.G === 'P' ? 'P' : 'T';
+            this.emit('game_result', {
+              tableId,
+              winner: w,
+              playerCards: [], bankerCards: [],
+              playerTotal: 0, bankerTotal: 0,
+              shoe: null, round: round.A,
+              playerPair: false, bankerPair: false,
+              isHistory: true
+            });
+          }
+          console.log(`📜 歷史重播: ${displayNum} ${d.List.length} 局`);
+        }
       } else {
         // 更新統計
         const info = this.tables.get(tableId);

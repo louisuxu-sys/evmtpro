@@ -279,7 +279,7 @@ function buildAnalysisFlex(engine, mtInfo, mode) {
 // ===== 每手推送用的輕量 Flex =====
 function buildHandResultFlex(engine, mtInfo, detail) {
   const state = engine.getState();
-  const { stats, ev, history } = state;
+  const { stats, ev, history, beadRoad } = state;
   const tableName = (mtInfo && mtInfo.tableName) || engine.tableName;
 
   const pred = predictNext(history, stats);
@@ -293,11 +293,7 @@ function buildHandResultFlex(engine, mtInfo, detail) {
   const evB = (ev && ev.banker != null) ? ev.banker.toFixed(4) : '-';
   const evP = (ev && ev.player != null) ? ev.player.toFixed(4) : '-';
 
-  // 牌面
-  let cardsText = '';
-  if (detail && detail.playerCards && detail.playerCards.length >= 2) {
-    cardsText = `閒：${fmtCards(detail.playerCards)}  莊：${fmtCards(detail.bankerCards)}`;
-  }
+  const hasCards = detail && detail.playerCards && detail.playerCards.length >= 2;
 
   const streak = getStreakInfo(history);
   const rl = streak.result === 'B' ? '莊' : streak.result === 'P' ? '閒' : '';
@@ -327,7 +323,13 @@ function buildHandResultFlex(engine, mtInfo, detail) {
               { type: 'text', text: winLabel, size: 'lg', weight: 'bold', color: winColor, flex: 1, align: 'end' }
             ]
           },
-          cardsText ? { type: 'text', text: cardsText, size: 'sm', color: '#444444', wrap: true } : null,
+          hasCards ? buildColoredCardRow('閒', detail.playerCards) : null,
+          hasCards ? buildColoredCardRow('莊', detail.bankerCards) : null,
+          // 近期 10 手路
+          beadRoad.slice(-10).length > 0 ? {
+            type: 'box', layout: 'horizontal', spacing: 'xs', margin: 'xs',
+            contents: beadRoad.slice(-10).map(b => circleBox(b.result, '20px'))
+          } : null,
           { type: 'separator' },
           // 下手預測
           {
@@ -362,6 +364,28 @@ function fmtCards(cards) {
   const RANK = { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' };
   const SUIT = { s: '♠', h: '♥', d: '♦', c: '♣' };
   return cards.map(c => `${SUIT[c.suit] || ''}${RANK[c.rank] || c.rank}`).join(' ');
+}
+
+// ===== 彩色花色牌面行元件 (♥♦=紅, ♠♣=黑) =====
+const SUIT_INFO = {
+  s: { sym: '♠', color: '#222222' },
+  h: { sym: '♥', color: '#e74c3c' },
+  d: { sym: '♦', color: '#e74c3c' },
+  c: { sym: '♣', color: '#222222' }
+};
+
+function buildColoredCardRow(label, cards) {
+  if (!cards || cards.length === 0) return null;
+  const RANK = { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' };
+  const items = [{ type: 'text', text: label + '：', size: 'sm', color: '#888888', flex: 0 }];
+  for (let i = 0; i < cards.length; i++) {
+    const c = cards[i];
+    const si = SUIT_INFO[c.suit] || { sym: '?', color: '#888888' };
+    const rank = RANK[c.rank] || String(c.rank);
+    if (i > 0) items.push({ type: 'text', text: ' ', size: 'sm', flex: 0 });
+    items.push({ type: 'text', text: si.sym + rank, size: 'sm', color: si.color, flex: 0, weight: 'bold' });
+  }
+  return { type: 'box', layout: 'horizontal', spacing: 'none', contents: items };
 }
 
 // ===== Quick Reply 常數（每則訊息底部的固定按鈕列）=====
