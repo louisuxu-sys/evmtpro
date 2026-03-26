@@ -27,33 +27,36 @@ function emptyCell(size) {
   return { type: 'box', layout: 'vertical', width: size, height: size, contents: [] };
 }
 
-// ===== 珠盤路 (6 欄，由左到右由上到下) =====
+// ===== 珠盤路 (6 行，由上到下填滿每欄後再往右) =====
 function buildBeadRoadFlex(beadRoad) {
-  const COLS = 6;
-  const recent = beadRoad.slice(-42); // max 7 rows × 6 cols
+  const ROWS = 6;
+  const MAX_COLS = 12; // 最多顯示 72 筆
+  const recent = beadRoad.slice(-(ROWS * MAX_COLS));
 
   if (recent.length === 0) {
     return [{ type: 'text', text: '（無資料）', size: 'xs', color: '#aaaaaa' }];
   }
 
-  const rowBoxes = [];
-  for (let i = 0; i < recent.length; i += COLS) {
-    const row = recent.slice(i, i + COLS);
-    rowBoxes.push({
-      type: 'box', layout: 'horizontal', spacing: 'xs', margin: 'xs',
-      contents: [
-        ...row.map(b => circleBox(b.result, '26px')),
-        ...Array(COLS - row.length).fill(null).map(() => emptyCell('26px'))
-      ]
-    });
+  const totalCols = Math.ceil(recent.length / ROWS);
+  const showCols = Math.min(totalCols, MAX_COLS);
+  const startIdx = Math.max(0, recent.length - showCols * ROWS);
+
+  const colBoxes = [];
+  for (let c = 0; c < showCols; c++) {
+    const cells = [];
+    for (let r = 0; r < ROWS; r++) {
+      const idx = startIdx + c * ROWS + r;
+      cells.push(idx < recent.length ? circleBox(recent[idx].result, '22px') : emptyCell('22px'));
+    }
+    colBoxes.push({ type: 'box', layout: 'vertical', spacing: 'xs', contents: cells });
   }
 
-  return [{ type: 'box', layout: 'vertical', spacing: 'none', contents: rowBoxes }];
+  return [{ type: 'box', layout: 'horizontal', spacing: 'xs', contents: colBoxes }];
 }
 
 // ===== 大路 (每欄向下疊加) =====
 function buildBigRoadFlex(bigRoad) {
-  const MAX_COLS = 8;
+  const MAX_COLS = 12;
   const MAX_ROWS = 6;
 
   if (bigRoad.length === 0) {
