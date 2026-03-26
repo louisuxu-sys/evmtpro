@@ -366,8 +366,8 @@ function fmtCards(cards) {
 const SUIT_INFO = {
   s: { sym: '♠', color: '#222222' },
   h: { sym: '♥', color: '#e74c3c' },
-  d: { sym: '♦', color: '#e74c3c' },
-  c: { sym: '♣', color: '#222222' }
+  d: { sym: '\u2663', color: '#222222' },
+  c: { sym: '\u2666', color: '#e74c3c' }
 };
 
 function buildColoredCardRow(label, cards) {
