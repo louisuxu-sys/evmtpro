@@ -364,4 +364,105 @@ function fmtCards(cards) {
   return cards.map(c => `${SUIT[c.suit] || ''}${RANK[c.rank] || c.rank}`).join(' ');
 }
 
-module.exports = { buildAnalysisFlex, buildHandResultFlex };
+// ===== Quick Reply 常數（每則訊息底部的固定按鈕列）=====
+const QUICK_REPLY = {
+  items: [
+    { type: 'action', action: { type: 'message', label: '❌ 取消跟隨', text: '取消' } },
+    { type: 'action', action: { type: 'message', label: '🏠 全廳', text: '全廳' } },
+    { type: 'action', action: { type: 'message', label: '📋 指令', text: '指令' } }
+  ]
+};
+
+// ===== 單一房間卡片 (用於 Carousel) =====
+function buildRoomBubble(lid, engine, mtInfo) {
+  const tableName = (mtInfo && mtInfo.tableName) || engine.tableName;
+  const displayNum = (mtInfo && mtInfo.displayNum) != null
+    ? String(mtInfo.displayNum)
+    : String(lid);
+  const dealer = (mtInfo && mtInfo.dealer && mtInfo.dealer.name) || engine.dealer || '-';
+  const summary = mtInfo && mtInfo.summary;
+  const roadText = (mtInfo && mtInfo.roadText) || '';
+
+  const total = summary ? summary.total : 0;
+  const statsText = total > 0
+    ? `莊${summary.banker} 閒${summary.player} 和${summary.tie}  共${total}局`
+    : '等待資料...';
+
+  // 迷你路（最後 12 手）
+  const recent = roadText.slice(-12);
+  const miniRoad = recent.split('').map(c => {
+    if (c === '莊') return { type: 'text', text: '●', color: COLOR_B, size: 'xs', flex: 0 };
+    if (c === '閒') return { type: 'text', text: '●', color: COLOR_P, size: 'xs', flex: 0 };
+    return { type: 'text', text: '○', color: COLOR_T, size: 'xs', flex: 0 };
+  });
+
+  return {
+    type: 'bubble',
+    size: 'nano',
+    header: {
+      type: 'box', layout: 'vertical', backgroundColor: COLOR_HEADER, paddingAll: 'sm',
+      contents: [
+        { type: 'text', text: `百家樂 ${displayNum}`, color: '#ffffff', weight: 'bold', size: 'sm', align: 'center' },
+        { type: 'text', text: dealer !== '-' ? `👤 ${dealer}` : '👤 未知荷官', color: '#aaccff', size: 'xs', align: 'center' }
+      ]
+    },
+    body: {
+      type: 'box', layout: 'vertical', spacing: 'xs', paddingAll: 'sm',
+      contents: [
+        { type: 'text', text: statsText, size: 'xs', color: '#555555', wrap: true },
+        miniRoad.length > 0
+          ? { type: 'box', layout: 'horizontal', spacing: 'none', margin: 'xs', contents: miniRoad.slice(0, 10) }
+          : { type: 'text', text: '（暫無路紙）', size: 'xxs', color: '#aaaaaa' }
+      ]
+    },
+    footer: {
+      type: 'box', layout: 'horizontal', spacing: 'xs', paddingAll: 'xs',
+      contents: [
+        {
+          type: 'button', style: 'primary', color: COLOR_B, height: 'sm', flex: 1,
+          action: { type: 'message', label: '跟隨', text: displayNum }
+        },
+        {
+          type: 'button', style: 'secondary', height: 'sm', flex: 1,
+          action: { type: 'message', label: '分析', text: `分析${displayNum}` }
+        }
+      ]
+    }
+  };
+}
+
+// ===== 全廳 Flex Carousel (最多 12 張/頁，超過分頁) =====
+function buildRoomCarousel(roomList) {
+  if (roomList.length === 0) {
+    return {
+      type: 'flex',
+      altText: '⏳ 正在連線 MT 平台...',
+      quickReply: QUICK_REPLY,
+      contents: {
+        type: 'bubble',
+        body: { type: 'box', layout: 'vertical', contents: [
+          { type: 'text', text: '⏳ 正在連線 MT 平台，請稍候...', size: 'sm', color: '#888888', wrap: true }
+        ]}
+      }
+    };
+  }
+
+  const PAGE_SIZE = 12;
+  const page = roomList.slice(0, PAGE_SIZE);
+  const bubbles = page.map(({ lid, engine, mtInfo }) => buildRoomBubble(lid, engine, mtInfo));
+
+  const altText = `🎰 共 ${roomList.length} 個百家樂桌，輸入房號跟隨`;
+
+  if (bubbles.length === 1) {
+    return { type: 'flex', altText, quickReply: QUICK_REPLY, contents: bubbles[0] };
+  }
+
+  return {
+    type: 'flex',
+    altText,
+    quickReply: QUICK_REPLY,
+    contents: { type: 'carousel', contents: bubbles }
+  };
+}
+
+module.exports = { buildAnalysisFlex, buildHandResultFlex, buildRoomCarousel, QUICK_REPLY };

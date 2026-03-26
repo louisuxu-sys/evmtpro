@@ -6,7 +6,7 @@ const path = require('path');
 const line = require('@line/bot-sdk');
 const BaccaratEngine = require('./baccarat-engine');
 const MTConnector = require('./mt-connector');
-const { buildAnalysisFlex, buildHandResultFlex } = require('./flex-builder');
+const { buildAnalysisFlex, buildHandResultFlex, buildRoomCarousel, QUICK_REPLY } = require('./flex-builder');
 
 const app = express();
 const server = http.createServer(app);
@@ -200,8 +200,14 @@ async function handleLineEvent(event) {
 
   // ===== 全廳掃描 =====
   if (text === '全廳' || text === '房間' || text === '廳') {
-    const summary = getRoomList();
-    await replyMessage(replyToken, summary);
+    const roomList = getRoomListData();
+    try {
+      const flex = buildRoomCarousel(roomList);
+      await replyFlex(replyToken, flex);
+    } catch (e) {
+      console.error('Carousel build error:', e.message);
+      await replyMessage(replyToken, getRoomListText());
+    }
     return;
   }
 
@@ -314,9 +320,11 @@ async function handleLineEvent(event) {
 // LINE 回覆訊息
 async function replyMessage(replyToken, text) {
   if (!lineClient) { console.error('LINE client 未初始化'); return; }
-  console.log('📤 嘗試回覆訊息, token:', replyToken.substring(0, 20) + '...');
   try {
-    await lineClient.replyMessage({ replyToken, messages: [{ type: 'text', text }] });
+    await lineClient.replyMessage({
+      replyToken,
+      messages: [{ type: 'text', text, quickReply: QUICK_REPLY }]
+    });
     console.log('✅ 回覆成功');
   } catch (err) {
     console.error('❌ LINE reply error:', err.message);
@@ -329,7 +337,8 @@ async function replyMessage(replyToken, text) {
 async function replyFlex(replyToken, flex) {
   if (!lineClient) { console.error('LINE client 未初始化'); return; }
   try {
-    await lineClient.replyMessage({ replyToken, messages: [flex] });
+    const msg = Object.assign({}, flex, { quickReply: QUICK_REPLY });
+    await lineClient.replyMessage({ replyToken, messages: [msg] });
     console.log('✅ Flex 回覆成功');
   } catch (err) {
     console.error('❌ LINE flex reply error:', err.message);
@@ -341,7 +350,10 @@ async function replyFlex(replyToken, flex) {
 async function pushMessage(targetId, text) {
   if (!lineClient) return;
   try {
-    await lineClient.pushMessage({ to: targetId, messages: [{ type: 'text', text }] });
+    await lineClient.pushMessage({
+      to: targetId,
+      messages: [{ type: 'text', text, quickReply: QUICK_REPLY }]
+    });
   } catch (err) {
     console.error('LINE push error:', err.message);
   }
@@ -351,7 +363,8 @@ async function pushMessage(targetId, text) {
 async function pushFlex(targetId, flex) {
   if (!lineClient) return;
   try {
-    await lineClient.pushMessage({ to: targetId, messages: [flex] });
+    const msg = Object.assign({}, flex, { quickReply: QUICK_REPLY });
+    await lineClient.pushMessage({ to: targetId, messages: [msg] });
   } catch (err) {
     console.error('LINE push flex error:', err.message);
   }
@@ -373,11 +386,8 @@ function fmtHand(cards) {
   return cards.map(c => fmtCard(c)).join(' ');
 }
 
-// 房間列表 (按真實房號排序)
-function getRoomList() {
-  if (tables.size === 0) return '⏳ 正在連線 MT 平台，請稍候...';
-
-  // 建立以房號排序的列表
+// 取得房間排序資料 (供 Carousel 和文字版共用)
+function getRoomListData() {
   const roomList = [];
   for (const [lid, engine] of tables) {
     const mtId = localToMtMap.get(lid);
@@ -385,22 +395,24 @@ function getRoomList() {
     if (!mtInfo) continue;
     roomList.push({ lid, engine, mtInfo });
   }
-  // 自然排序: 數字房號先，然後 B 系列
   roomList.sort((a, b) => {
     const na = String(a.mtInfo.displayNum), nb = String(b.mtInfo.displayNum);
     const ia = parseInt(na) || 999, ib = parseInt(nb) || 999;
     if (ia !== ib) return ia - ib;
     return na.localeCompare(nb);
   });
+  return roomList;
+}
 
-  let text = `🎰 百家之眼 - MT百家樂
-`;
-  for (const { lid, engine, mtInfo } of roomList) {
+// 文字版房間列表 (Carousel 失敗時的備用)
+function getRoomListText() {
+  if (tables.size === 0) return '⏳ 正在連線 MT 平台，請稍候...';
+  const roomList = getRoomListData();
+  let text = `🎰 百家之眼 - MT百家樂\n`;
+  for (const { engine, mtInfo } of roomList) {
     const summary = mtInfo.summary;
     const dealer = mtInfo.dealer?.name || '-';
     const road = mtInfo.roadText || '';
-    const rn = mtInfo.displayNum;
-
     text += `\n${engine.tableName}`;
     if (dealer && dealer !== '-') text += ` | 👤${dealer}`;
     if (summary && summary.total > 0) {
@@ -408,9 +420,7 @@ function getRoomList() {
     }
     if (road) text += `\n   ${road.substring(0, 30)}`;
   }
-  text += `\n\n━━━━━━━━\n`;
-  text += `共 ${roomList.length} 個百家樂桌\n`;
-  text += `輸入房號跟隨，如: 2 或 B01`;
+  text += `\n\n━━━━━━━━\n共 ${roomList.length} 個百家樂桌\n輸入房號跟隨，如: 2 或 B01`;
   return text;
 }
 
