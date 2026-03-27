@@ -287,7 +287,7 @@ function buildAnalysisFlex(engine, mtInfo, mode) {
       size: 'giga',
       header: {
         type: 'box', layout: 'vertical', backgroundColor: COLOR_HEADER, paddingAll: 'md',
-        contents: [{ type: 'text', text: '新紀元百家 AI 分析', color: '#ffffff', weight: 'bold', size: 'lg', align: 'center' }]
+        contents: [{ type: 'text', text: 'Yahoo', color: '#ffffff', weight: 'bold', size: 'lg', align: 'center' }]
       },
       body: {
         type: 'box', layout: 'vertical', spacing: 'sm', paddingAll: 'sm', backgroundColor: '#f8f9fa',
