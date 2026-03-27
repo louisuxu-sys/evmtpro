@@ -98,7 +98,8 @@ function buildBigRoadFlex(bigRoad) {
     const cells = [];
     for (let r = 0; r < MAX_ROWS; r++) {
       const cell = grid[c][r];
-      cells.push(cell ? circleNumBox(cell.result, cell.num, CELL) : emptyCell(CELL));
+      const label = cell ? (cell.result === 'B' ? '莊' : cell.result === 'P' ? '閒' : '和') : null;
+      cells.push(cell ? circleNumBox(cell.result, label, CELL) : emptyCell(CELL));
     }
     colBoxes.push({ type: 'box', layout: 'vertical', contents: cells, spacing: 'xs', flex: 0, width: CELL, alignItems: 'center' });
   }
