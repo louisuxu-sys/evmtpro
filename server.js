@@ -947,6 +947,25 @@ function broadcastWS(data) {
   }
 }
 
+// ===== Keep-alive (防止 Render 免費方案休眠) =====
+app.get('/health', (req, res) => res.json({ ok: true, ts: Date.now(), tables: tables.size }));
+
+function startKeepAlive() {
+  const selfUrl = process.env.RENDER_EXTERNAL_URL || 'https://evmtpro.onrender.com';
+  const pingUrl = `${selfUrl}/health`;
+  const https = require('https');
+  const http  = require('http');
+  const mod   = pingUrl.startsWith('https') ? https : http;
+  setInterval(() => {
+    mod.get(pingUrl, (res) => {
+      let data = '';
+      res.on('data', d => data += d);
+      res.on('end', () => console.log(`🏓 Keep-alive ping OK (${res.statusCode})`));
+    }).on('error', e => console.error('🏓 Keep-alive ping error:', e.message));
+  }, 8 * 60 * 1000); // 每 8 分鐘 (Render 15 分鐘無活動才休眠)
+  console.log(`🏓 Keep-alive 已啟動，每 8 分鐘 ping ${pingUrl}`);
+}
+
 // ===== 啟動伺服器 =====
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
@@ -974,4 +993,5 @@ server.listen(PORT, () => {
   } else {
     console.log('📡 等待 Chrome 擴充功能或管理員手動操作...');
   }
+  startKeepAlive();
 });
