@@ -786,11 +786,15 @@ app.post('/admin/navigate', checkAdmin, express.json(), async (req, res) => {
 
 // 診斷：MT connector 內部狀態（DD key 格式、G 值樣本）
 app.get('/api/debug/connector', (req, res) => {
+  const first = [...mtConnector.tables.values()][0];
   res.json({
     ddKeyLog: mtConnector._ddKeyLog ? [...mtConnector._ddKeyLog] : [],
+    signalrTargets: mtConnector._signalrTargets ? [...mtConnector._signalrTargets] : [],
     unknownG:  mtConnector._unknownG  ? [...mtConnector._unknownG]  : [],
     tableCount: mtConnector.tables.size,
     localToMtMap: [...localToMtMap.entries()].slice(0, 5),
+    firstTableRawKeys: first && first._raw ? Object.keys(first._raw) : [],
+    firstTableRaw: first && first._raw ? JSON.stringify(first._raw).substring(0, 800) : null,
     connectorTables: [...mtConnector.tables.entries()].slice(0, 3).map(([id, info]) => ({
       tableId: id,
       tableName: info.tableName,
