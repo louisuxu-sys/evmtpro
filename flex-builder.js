@@ -450,6 +450,7 @@ function buildColoredCardRow(label, cards) {
 // ===== Quick Reply 常數（每則訊息底部的固定按鈕列）=====
 const QUICK_REPLY = {
   items: [
+    { type: 'action', action: { type: 'message', label: '🃏 繼續分析', text: '繼續分析' } },
     { type: 'action', action: { type: 'message', label: '❌ 取消跟隨', text: '取消' } },
     { type: 'action', action: { type: 'message', label: '🏠 全廳', text: '全廳' } },
     { type: 'action', action: { type: 'message', label: '📋 指令', text: '指令' } }

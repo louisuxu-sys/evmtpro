@@ -113,11 +113,7 @@ mtConnector.on('game_result', (data) => {
   // 廣播到前端
   broadcastWS({ type: 'update', tableId: localId, state });
 
-  // 推送給跟隨此房間的 LINE 用戶（歷史重播不推送；無牌面資料時不推送，省配額）
-  const hasCards = data.playerCards && data.playerCards.length >= 2;
-  if (!data.isHistory && hasCards) {
-    pushToFollowers(data.tableId, localId, engine, ev, lastDetail);
-  }
+  // 不自動推送（用戶需點「繼續分析」按鈕才回展）；內部引擎持續記錄牌路
 
   if (!data.isHistory) {
     console.log(`✅ 第${localId}廳 ${engine.tableName} 第${engine.handCount}局`);
@@ -310,6 +306,35 @@ async function handleLineEvent(event) {
     return;
   }
 
+  // ===== 繼續分析（免費 pull 模式：回展最新一手牌型）=====
+  if (text === '繼續分析' || text === '最新牌型' || text === '追蹤') {
+    const followInfo = userFollowing.get(targetId);
+    if (!followInfo) {
+      await replyMessage(replyToken, '您尚未跟隨任何房間\n請先輸入房號（如：2 或 B01）');
+      return;
+    }
+    const eng = tables.get(followInfo.localId);
+    const mtInfo = mtConnector.tables.get(followInfo.mtTableId);
+    if (!eng) {
+      await replyMessage(replyToken, '房間資料不存在，請重新輸入房號。');
+      return;
+    }
+    const st = eng.getState();
+    const lastD = st.handDetails[st.handDetails.length - 1];
+    if (!lastD) {
+      await replyMessage(replyToken, `「${eng.tableName}」尚無開牌記錄，請稍後再詢。`);
+      return;
+    }
+    try {
+      const flex = buildHandResultFlex(eng, mtInfo, lastD);
+      await replyFlex(replyToken, flex);
+    } catch (e) {
+      const ev = st.ev || 0;
+      await replyMessage(replyToken, formatHandResult(followInfo.localId, eng, ev, lastD));
+    }
+    return;
+  }
+
   // ===== 取消跟隨 =====
   if (text === '取消' || text === '取消跟隨' || text === '離開') {
     if (userFollowing.has(targetId)) {
@@ -328,6 +353,7 @@ async function handleLineEvent(event) {
       `🎰 百家之眼 - 指令列表\n` +
       `📊 全廳 - 查看所有百家樂房間\n` +
       `🔢 輸入房號 - 跟隨房間，如: 2 或 B01\n` +
+      `🃏 繼續分析 - 查看最新一手牌型（免費）\n` +
       `🔍 分析X - 查看 AI 分析，如: 分析2 或 分析B01\n` +
       `❌ 取消 - 停止跟隨\n` +
       `❓ 指令 - 顯示此幫助`
