@@ -1365,8 +1365,15 @@ class MTConnector extends EventEmitter {
       // 從 List 建立牌路
       if (d.List && Array.isArray(d.List) && d.List.length > 0) {
         const info = this.tables.get(tableId);
-        // 正規化完整路史（每次更新）供 Flex 路盤直接使用
-        if (info) info.listHistory = d.List.map(r => this._normalizeG(r.G));
+        // 正規化完整路史供 Flex 路盤直接使用
+        // 只在新 List 較長（或首次）時才覆寫，防止短 List 更新清除完整靴記錄
+        // 例外：新靴開始（Total ≤ 3 且舊紀錄 > 10）時重置
+        const newListHistory = d.List.map(r => this._normalizeG(r.G));
+        const isNewShoe = info && info.listHistory && info.listHistory.length > 10 && newListHistory.length <= 3;
+        if (info && (isNewShoe || !info.listHistory || newListHistory.length >= info.listHistory.length)) {
+          info.listHistory = newListHistory;
+          if (isNewShoe) console.log(`🔄 ${tableId} 新靴開始，重置 listHistory`);
+        }
         // 建牌路文字：最後 30 局
         const recent = d.List.slice(-30);
         const roadText = recent.map(r => {
