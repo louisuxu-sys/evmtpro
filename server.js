@@ -69,10 +69,11 @@ mtConnector.on('tables_list', (mtTables) => {
       const localId = mtTableIdMap.get(mt.tableId);
       const engine = tables.get(localId);
       if (engine && mt.dealer) engine.setDealer(mt.dealer.name || '');
-      // 补充歷史：若 engine 仍空且 listHistory 已有資料（第一次 tables_list 在 d.List 到達前就發出）
-      if (engine && engine.handCount === 0 && mt.listHistory && mt.listHistory.length > 0) {
-        for (const winner of mt.listHistory) engine.recordHand(winner, [], []);
-        console.log(`  📜 補充歷史: 第${localId}廳 ${mt.listHistory.length}局`);
+      // 補充歷史：listHistory 比 engine 長時，把差額補進去（server 重啟後 game_result 可能先發一筆，這裡補齊其餘的）
+      if (engine && mt.listHistory && mt.listHistory.length > engine.handCount) {
+        const missing = mt.listHistory.slice(engine.handCount);
+        for (const winner of missing) engine.recordHand(winner, [], []);
+        console.log(`  📜 補充歷史: 第${localId}廳 +${missing.length}局 (共${engine.handCount}局)`);
       }
     }
   }
