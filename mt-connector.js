@@ -1699,14 +1699,16 @@ class MTConnector extends EventEmitter {
 
       // 從 trend.bead_plate2 解碼歷史路（末碼 2=莊 1=閒 3=和；去除 # 等分隔符）
       let listHistory = [];
+      let listPoints = [];
       const trend = t.trend || t.Trend;
       if (trend && typeof trend.bead_plate2 === 'string' && trend.bead_plate2.length >= 2) {
         const bead = trend.bead_plate2.replace(/[^0-9]/g, '');
         for (let bi = 0; bi + 1 < bead.length; bi += 2) {
+          const pts = parseInt(bead[bi]);
           const code = bead[bi + 1];
-          if (code === '2') listHistory.push('B');
-          else if (code === '1') listHistory.push('P');
-          else if (code === '3') listHistory.push('T');
+          if (code === '2') { listHistory.push('B'); listPoints.push(pts); }
+          else if (code === '1') { listHistory.push('P'); listPoints.push(pts); }
+          else if (code === '3') { listHistory.push('T'); listPoints.push(pts); }
         }
         if (listHistory.length > 0) {
           console.log(`📜 ${tableId}(${tableName}) bead_plate2 解碼 ${listHistory.length}局: ${listHistory.slice(-5).join('')}`);
@@ -1740,6 +1742,9 @@ class MTConnector extends EventEmitter {
         listHistory: (shoeSwitched && listHistory.length > 0) ? listHistory
           : (existingInfo && existingInfo.listHistory && existingInfo.listHistory.length > listHistory.length)
             ? existingInfo.listHistory : (listHistory.length > 0 ? listHistory : (existingInfo && existingInfo.listHistory) || []),
+        listPoints: (shoeSwitched && listPoints.length > 0) ? listPoints
+          : (existingInfo && existingInfo.listPoints && existingInfo.listPoints.length > listPoints.length)
+            ? existingInfo.listPoints : (listPoints.length > 0 ? listPoints : (existingInfo && existingInfo.listPoints) || []),
         _raw: t
       };
       this.tables.set(tableId, info);
@@ -1835,14 +1840,16 @@ class MTConnector extends EventEmitter {
 
       // 從 trend.bead_plate2 解碼歷史路（末碼 2=莊 1=閒 3=和；去除 # 等分隔符）
       let listHistory = [];
+      let listPoints = [];
       const trend = table.trend || table.Trend;
       if (trend && typeof trend.bead_plate2 === 'string' && trend.bead_plate2.length >= 2) {
         const bead = trend.bead_plate2.replace(/[^0-9]/g, '');
         for (let bi = 0; bi + 1 < bead.length; bi += 2) {
+          const pts = parseInt(bead[bi]);
           const code = bead[bi + 1];
-          if (code === '2') listHistory.push('B');
-          else if (code === '1') listHistory.push('P');
-          else if (code === '3') listHistory.push('T');
+          if (code === '2') { listHistory.push('B'); listPoints.push(pts); }
+          else if (code === '1') { listHistory.push('P'); listPoints.push(pts); }
+          else if (code === '3') { listHistory.push('T'); listPoints.push(pts); }
         }
         if (listHistory.length > 0) {
           console.log(`📜 ${tableId}(${table.table_name}) bead2 ${listHistory.length}局: ${listHistory.slice(-5).join('')}`);
@@ -1869,6 +1876,9 @@ class MTConnector extends EventEmitter {
         listHistory: (shoeSwitched && listHistory.length > 0) ? listHistory
           : (existing && existing.listHistory && existing.listHistory.length > listHistory.length)
             ? existing.listHistory : (listHistory.length > 0 ? listHistory : (existing && existing.listHistory) || []),
+        listPoints: (shoeSwitched && listPoints.length > 0) ? listPoints
+          : (existing && existing.listPoints && existing.listPoints.length > listPoints.length)
+            ? existing.listPoints : (listPoints.length > 0 ? listPoints : (existing && existing.listPoints) || []),
         _raw: table
       };
       this.tables.set(tableId, info);

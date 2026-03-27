@@ -193,25 +193,28 @@ function getDerivedRoadStats(bigRoad) {
 function historyToBeadRoad(history) {
   return history.map((h, i) => ({ index: i, result: h }));
 }
-function historyToBigRoad(history) {
+function historyToBigRoad(history, points) {
   const MAX_ROWS = 6;
   const grid = new Map();
   let r = 0, c = 0, vertCol = 0, tailing = false, last = null, first = true, streakNum = 0;
-  for (const h of history) {
+  for (let i = 0; i < history.length; i++) {
+    const h = history[i];
+    const pts = points && points[i] !== undefined && !isNaN(points[i]) ? points[i] : null;
     if (h === 'T') continue;
-    if (first) { streakNum = 1; grid.set(`${r},${c}`, { result: h, num: streakNum }); first = false; last = h; continue; }
+    streakNum = (h === last && !first) ? streakNum + 1 : 1;
+    const num = (pts !== null) ? pts : streakNum;
+    if (first) { grid.set(`${r},${c}`, { result: h, num }); first = false; last = h; continue; }
     if (h === last) {
-      streakNum++;
       if (!tailing && r + 1 < MAX_ROWS && !grid.has(`${r+1},${c}`)) { r++; }
       else { tailing = true; c++; while (grid.has(`${r},${c}`)) c++; }
     } else {
-      tailing = false; streakNum = 1;
+      tailing = false;
       let nc = vertCol + 1;
       r = 0;
       while (grid.has(`${r},${nc}`)) nc++;
       c = nc; vertCol = c;
     }
-    grid.set(`${r},${c}`, { result: h, num: streakNum }); last = h;
+    grid.set(`${r},${c}`, { result: h, num }); last = h;
   }
   const road = [];
   for (const [key, data] of grid) {
@@ -230,8 +233,10 @@ function buildAnalysisFlex(engine, mtInfo, mode) {
   // 取較長的那份歷史（listHistory=WS快照 / engineHistory=即時累積）
   const liveHistory = (mtInfo && mtInfo.listHistory && mtInfo.listHistory.length >= engineHistory.length)
     ? mtInfo.listHistory : engineHistory;
+  const livePoints = (mtInfo && mtInfo.listPoints && mtInfo.listPoints.length >= liveHistory.length)
+    ? mtInfo.listPoints.slice(-liveHistory.length) : (mtInfo && mtInfo.listPoints) || [];
   const beadRoad = historyToBeadRoad(liveHistory);
-  const bigRoad  = historyToBigRoad(liveHistory);
+  const bigRoad  = historyToBigRoad(liveHistory, livePoints);
   const history  = liveHistory;
 
   // \u82e5 engine \u7121\u6b77\u53f2\uff0c\u5f9e liveHistory \u88dc\u7b97\u7d71\u8a08
