@@ -350,8 +350,22 @@ function buildHandResultFlex(engine, mtInfo, detail) {
   const predLabel = pred.result === 'B' ? '莊' : pred.result === 'P' ? '閒' : '和';
   const predColor = pred.result === 'B' ? COLOR_B : pred.result === 'P' ? COLOR_P : COLOR_T;
 
-  const winLabel = detail && detail.winner === 'B' ? '莊贏' : detail && detail.winner === 'P' ? '閒贏' : detail && detail.winner === 'T' ? '和局' : '?';
-  const winColor = detail && detail.winner === 'B' ? COLOR_B : detail && detail.winner === 'P' ? COLOR_P : COLOR_T;
+  // 勝方：優先用 winner 欄位，否則從牌點計算，避免顯示 '?'
+  let _w = detail && detail.winner;
+  if (!_w || (_w !== 'B' && _w !== 'P' && _w !== 'T')) {
+    const bv = r => r >= 10 ? 0 : r;
+    const pc = detail && detail.playerCards;
+    const bc = detail && detail.bankerCards;
+    if (pc && bc && pc.length >= 2 && bc.length >= 2) {
+      const pt = pc.reduce((s, c) => (s + bv(c.rank)) % 10, 0);
+      const bt = bc.reduce((s, c) => (s + bv(c.rank)) % 10, 0);
+      _w = pt > bt ? 'P' : bt > pt ? 'B' : 'T';
+    } else if (detail && detail.playerTotal != null && detail.bankerTotal != null) {
+      _w = detail.playerTotal > detail.bankerTotal ? 'P' : detail.bankerTotal > detail.playerTotal ? 'B' : 'T';
+    }
+  }
+  const winLabel = _w === 'B' ? '莊贏' : _w === 'P' ? '閒贏' : _w === 'T' ? '和局' : '-';
+  const winColor = _w === 'B' ? COLOR_B : _w === 'P' ? COLOR_P : _w === 'T' ? COLOR_T : '#888888';
 
   const total = stats.banker + stats.player + stats.tie;
   const evB = (ev && ev.banker != null) ? ev.banker.toFixed(4) : '-';
@@ -365,7 +379,7 @@ function buildHandResultFlex(engine, mtInfo, detail) {
 
   return {
     type: 'flex',
-    altText: `${tableName} 第${detail && detail.hand || '?'}手 ${winLabel} | 下手預測${predLabel}`,
+    altText: `${tableName} 第${detail && detail.hand || engine.handCount || '-'}手 ${winLabel} | 下手預測${predLabel}`,
     contents: {
       type: 'bubble',
       size: 'mega',
