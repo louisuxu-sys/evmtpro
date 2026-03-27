@@ -1724,18 +1724,22 @@ class MTConnector extends EventEmitter {
       }
 
       const existingInfo = this.tables.get(tableId);
+      const newShoe = t.shoe || t.Shoe || t.shoeNo || (trend && trend.current_shoe) || null;
+      const shoeSwitched = newShoe && existingInfo && existingInfo.shoe && String(existingInfo.shoe) !== String(newShoe);
+      if (shoeSwitched) console.log(`🔄 ${tableId} 換靴 ${existingInfo.shoe}→${newShoe}，清除舊路`);
       const info = {
         tableId,
         tableName,
         dealer,
-        shoe: t.shoe || t.Shoe || t.shoeNo || (trend && trend.current_shoe) || null,
+        shoe: newShoe,
         round: t.round || t.Round || t.roundNo || (trend && trend.current_round) || null,
         state: t.status || t.state || t.Status || t.State,
         hall: t.hall || t.Hall || '',
         summary,
-        // 保留較長的歷史（避免短更新覆蓋完整路史）
-        listHistory: (existingInfo && existingInfo.listHistory && existingInfo.listHistory.length > listHistory.length)
-          ? existingInfo.listHistory : (listHistory.length > 0 ? listHistory : (existingInfo && existingInfo.listHistory) || []),
+        // 換靴時重置；同靴內保留最長路史
+        listHistory: shoeSwitched ? listHistory
+          : (existingInfo && existingInfo.listHistory && existingInfo.listHistory.length > listHistory.length)
+            ? existingInfo.listHistory : (listHistory.length > 0 ? listHistory : (existingInfo && existingInfo.listHistory) || []),
         _raw: t
       };
       this.tables.set(tableId, info);
@@ -1847,19 +1851,24 @@ class MTConnector extends EventEmitter {
 
       const totalRound = trend ? (parseInt(trend.total_round || '0') || listHistory.length) : listHistory.length;
       const existing = this.tables.get(tableId);
+      const newShoe = table.shoe || (trend && trend.current_shoe) || null;
+      const shoeSwitched = newShoe && existing && existing.shoe && String(existing.shoe) !== String(newShoe);
+      if (shoeSwitched) console.log(`🔄 ${tableId} 換靴 ${existing.shoe}→${newShoe}，清除舊路`);
       const info = {
         tableId: tableId,
         tableName: table.table_name || tableId,
         dealer: this.parseDealerInfo(table.dealer),
-        shoe: table.shoe || (trend && trend.current_shoe) || null,
+        shoe: newShoe,
         round: table.round || (trend && trend.current_round) || null,
         state: table.state,
         roomId: table.room_id,
         hall: table.hall,
         gameTypeId: table.gametype_id,
         summary: { total: totalRound, banker: listHistory.filter(g=>g==='B').length, player: listHistory.filter(g=>g==='P').length, tie: listHistory.filter(g=>g==='T').length },
-        listHistory: (existing && existing.listHistory && existing.listHistory.length > listHistory.length)
-          ? existing.listHistory : (listHistory.length > 0 ? listHistory : (existing && existing.listHistory) || []),
+        // 換靴時重置；同靴內保留最長路史
+        listHistory: shoeSwitched ? listHistory
+          : (existing && existing.listHistory && existing.listHistory.length > listHistory.length)
+            ? existing.listHistory : (listHistory.length > 0 ? listHistory : (existing && existing.listHistory) || []),
         _raw: table
       };
       this.tables.set(tableId, info);
