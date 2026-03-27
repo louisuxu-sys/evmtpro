@@ -1697,11 +1697,11 @@ class MTConnector extends EventEmitter {
       // 如果無法判斷遊戲類型，先全部收（之後再過濾）
       if (!isBaccarat && gameType && !gameType.includes('bac')) continue;
 
-      // 從 trend.bead_plate2 解碼歷史路（每 2 字元一局：末碼 2=莊 1=閒 3=和）
+      // 從 trend.bead_plate2 解碼歷史路（末碼 2=莊 1=閒 3=和；去除 # 等分隔符）
       let listHistory = [];
       const trend = t.trend || t.Trend;
       if (trend && typeof trend.bead_plate2 === 'string' && trend.bead_plate2.length >= 2) {
-        const bead = trend.bead_plate2;
+        const bead = trend.bead_plate2.replace(/[^0-9]/g, '');
         for (let bi = 0; bi + 1 < bead.length; bi += 2) {
           const code = bead[bi + 1];
           if (code === '2') listHistory.push('B');
@@ -1829,11 +1829,11 @@ class MTConnector extends EventEmitter {
       // 只收百家樂桌 (BAG=百家, BAV=視訊百家)，排除骰寶/龍虎/牛牛等
       if (!tableId.startsWith('BA')) continue;
 
-      // 從 trend.bead_plate2 解碼歷史路（末碼 2=莊 1=閒 3=和）
+      // 從 trend.bead_plate2 解碼歷史路（末碼 2=莊 1=閒 3=和；去除 # 等分隔符）
       let listHistory = [];
       const trend = table.trend || table.Trend;
       if (trend && typeof trend.bead_plate2 === 'string' && trend.bead_plate2.length >= 2) {
-        const bead = trend.bead_plate2;
+        const bead = trend.bead_plate2.replace(/[^0-9]/g, '');
         for (let bi = 0; bi + 1 < bead.length; bi += 2) {
           const code = bead[bi + 1];
           if (code === '2') listHistory.push('B');
