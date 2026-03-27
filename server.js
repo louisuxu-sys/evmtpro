@@ -113,8 +113,9 @@ mtConnector.on('game_result', (data) => {
   // 廣播到前端
   broadcastWS({ type: 'update', tableId: localId, state });
 
-  // 推送給跟隨此房間的 LINE 用戶（歷史重播不推送）
-  if (!data.isHistory) {
+  // 推送給跟隨此房間的 LINE 用戶（歷史重播不推送；無牌面資料時不推送，省配額）
+  const hasCards = data.playerCards && data.playerCards.length >= 2;
+  if (!data.isHistory && hasCards) {
     pushToFollowers(data.tableId, localId, engine, ev, lastDetail);
   }
 
@@ -391,9 +392,12 @@ async function pushFlex(targetId, flex, _retry) {
   } catch (err) {
     const code = err.statusCode || (err.message && parseInt(err.message));
     const body = err.body ? JSON.stringify(err.body) : '';
-    if (code === 429 && !_retry) {
-      console.warn(`⚠️  LINE 429 Too Many Requests - retry in 12s (${body})`);
+    const isMonthlyLimit = body.includes('monthly limit');
+    if (code === 429 && !_retry && !isMonthlyLimit) {
+      console.warn(`⚠️  LINE 429 rate limit - retry in 12s`);
       setTimeout(() => pushFlex(targetId, flex, true), 12000);
+    } else if (isMonthlyLimit) {
+      console.error(`❌ LINE 月配額已耗盡！請至 LINE Developer Console 升級方案（目前每月上限 200 則）`);
     } else {
       console.error(`LINE push flex error: ${code} - ${err.message} ${body}`);
     }
