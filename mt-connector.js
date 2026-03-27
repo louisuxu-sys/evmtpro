@@ -1369,8 +1369,16 @@ class MTConnector extends EventEmitter {
         // 正規化完整路史供 Flex 路盤直接使用
         // 只在新 List 較長（或首次）時才覆寫，防止短 List 更新清除完整靴記錄
         const newListHistory = d.List.map(r => this._normalizeG(r.G));
+        const newListPoints = d.List.map(r => {
+          const g = this._normalizeG(r.G);
+          if (g === 'B' && r.WB !== undefined) return r.WB;
+          if (g === 'P' && r.WP !== undefined) return r.WP;
+          if (g === 'T') return r.WP !== undefined ? r.WP : (r.WB !== undefined ? r.WB : null);
+          return null;
+        });
         if (info && (!info.listHistory || newListHistory.length >= info.listHistory.length)) {
           info.listHistory = newListHistory;
+          info.listPoints = newListPoints;
           console.log(`📝 ${tableId} listHistory 更新: ${newListHistory.length}筆`);
         } else if (info && info.listHistory) {
           console.log(`⏭️  ${tableId} 跳過短 List(${newListHistory.length}) 保留既有(${info.listHistory.length})筆`);
@@ -1699,16 +1707,14 @@ class MTConnector extends EventEmitter {
 
       // 從 trend.bead_plate2 解碼歷史路（末碼 2=莊 1=閒 3=和；去除 # 等分隔符）
       let listHistory = [];
-      let listPoints = [];
       const trend = t.trend || t.Trend;
       if (trend && typeof trend.bead_plate2 === 'string' && trend.bead_plate2.length >= 2) {
         const bead = trend.bead_plate2.replace(/[^0-9]/g, '');
         for (let bi = 0; bi + 1 < bead.length; bi += 2) {
-          const pts = parseInt(bead[bi]);
           const code = bead[bi + 1];
-          if (code === '2') { listHistory.push('B'); listPoints.push(pts); }
-          else if (code === '1') { listHistory.push('P'); listPoints.push(pts); }
-          else if (code === '3') { listHistory.push('T'); listPoints.push(pts); }
+          if (code === '2') listHistory.push('B');
+          else if (code === '1') listHistory.push('P');
+          else if (code === '3') listHistory.push('T');
         }
         if (listHistory.length > 0) {
           console.log(`📜 ${tableId}(${tableName}) bead_plate2 解碼 ${listHistory.length}局: ${listHistory.slice(-5).join('')}`);
@@ -1742,9 +1748,7 @@ class MTConnector extends EventEmitter {
         listHistory: (shoeSwitched && listHistory.length > 0) ? listHistory
           : (existingInfo && existingInfo.listHistory && existingInfo.listHistory.length > listHistory.length)
             ? existingInfo.listHistory : (listHistory.length > 0 ? listHistory : (existingInfo && existingInfo.listHistory) || []),
-        listPoints: (shoeSwitched && listPoints.length > 0) ? listPoints
-          : (existingInfo && existingInfo.listPoints && existingInfo.listPoints.length > listPoints.length)
-            ? existingInfo.listPoints : (listPoints.length > 0 ? listPoints : (existingInfo && existingInfo.listPoints) || []),
+        listPoints: [],
         _raw: t
       };
       this.tables.set(tableId, info);
@@ -1840,16 +1844,14 @@ class MTConnector extends EventEmitter {
 
       // 從 trend.bead_plate2 解碼歷史路（末碼 2=莊 1=閒 3=和；去除 # 等分隔符）
       let listHistory = [];
-      let listPoints = [];
       const trend = table.trend || table.Trend;
       if (trend && typeof trend.bead_plate2 === 'string' && trend.bead_plate2.length >= 2) {
         const bead = trend.bead_plate2.replace(/[^0-9]/g, '');
         for (let bi = 0; bi + 1 < bead.length; bi += 2) {
-          const pts = parseInt(bead[bi]);
           const code = bead[bi + 1];
-          if (code === '2') { listHistory.push('B'); listPoints.push(pts); }
-          else if (code === '1') { listHistory.push('P'); listPoints.push(pts); }
-          else if (code === '3') { listHistory.push('T'); listPoints.push(pts); }
+          if (code === '2') listHistory.push('B');
+          else if (code === '1') listHistory.push('P');
+          else if (code === '3') listHistory.push('T');
         }
         if (listHistory.length > 0) {
           console.log(`📜 ${tableId}(${table.table_name}) bead2 ${listHistory.length}局: ${listHistory.slice(-5).join('')}`);
@@ -1876,9 +1878,7 @@ class MTConnector extends EventEmitter {
         listHistory: (shoeSwitched && listHistory.length > 0) ? listHistory
           : (existing && existing.listHistory && existing.listHistory.length > listHistory.length)
             ? existing.listHistory : (listHistory.length > 0 ? listHistory : (existing && existing.listHistory) || []),
-        listPoints: (shoeSwitched && listPoints.length > 0) ? listPoints
-          : (existing && existing.listPoints && existing.listPoints.length > listPoints.length)
-            ? existing.listPoints : (listPoints.length > 0 ? listPoints : (existing && existing.listPoints) || []),
+        listPoints: [],
         _raw: table
       };
       this.tables.set(tableId, info);
