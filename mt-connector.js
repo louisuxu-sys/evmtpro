@@ -1334,7 +1334,8 @@ class MTConnector extends EventEmitter {
           }
         };
         this.tables.set(tableId, info);
-        console.log(`📋 房間 ${displayNum} (${tableId}) 共${summary.Total}局 莊${summary.Banker} 閒${summary.Player} 和${summary.Tie}`);
+        const listLen = d.List ? d.List.length : 0;
+        console.log(`📋 房間 ${displayNum} (${tableId}) 共${summary.Total}局 莊${summary.Banker} 閒${summary.Player} 和${summary.Tie} | D.List=${listLen}筆`);
 
         // 記錄首個 G 值樣本（除錯用）
         if (d.List && d.List[0] && !this._gLogged) { this._gLogged = true; console.log(`📊 List G樣本: ${JSON.stringify(d.List.slice(0,3).map(r=>r.G))}`); }
@@ -1373,6 +1374,9 @@ class MTConnector extends EventEmitter {
         if (info && (isNewShoe || !info.listHistory || newListHistory.length >= info.listHistory.length)) {
           info.listHistory = newListHistory;
           if (isNewShoe) console.log(`🔄 ${tableId} 新靴開始，重置 listHistory`);
+          else console.log(`📝 ${tableId} listHistory 更新: ${newListHistory.length}筆`);
+        } else if (info && info.listHistory) {
+          console.log(`⏭️  ${tableId} 跳過短 List(${newListHistory.length}) 保留既有(${info.listHistory.length})筆`);
         }
         // 建牌路文字：最後 30 局
         const recent = d.List.slice(-30);
