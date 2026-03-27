@@ -394,6 +394,11 @@ async function replyFlex(replyToken, flex) {
   } catch (err) {
     console.error('❌ LINE flex reply error:', err.message);
     if (err.body) console.error('  Body:', JSON.stringify(err.body));
+    // 降級：改發文字訊息，避免使用者看到空白
+    try {
+      await lineClient.replyMessage({ replyToken, messages: [{ type: 'text', text: `⚠️ 卡片顯示失敗 (${err.message?.substring(0, 60)})
+請重試或輸入「指令」查看說明` }] });
+    } catch (e2) { console.error('降級文字也失敗:', e2.message); }
   }
 }
 

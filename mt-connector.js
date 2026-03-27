@@ -1726,7 +1726,7 @@ class MTConnector extends EventEmitter {
       const existingInfo = this.tables.get(tableId);
       const newShoe = t.shoe || t.Shoe || t.shoeNo || (trend && trend.current_shoe) || null;
       const shoeSwitched = newShoe && existingInfo && existingInfo.shoe && String(existingInfo.shoe) !== String(newShoe);
-      if (shoeSwitched) console.log(`🔄 ${tableId} 換靴 ${existingInfo.shoe}→${newShoe}，清除舊路`);
+      if (shoeSwitched) console.log(`🔄 ${tableId} 換靴 ${existingInfo.shoe}→${newShoe}，${listHistory.length > 0 ? '清除舊路' : '保留舊路待新靴資料'}`);
       const info = {
         tableId,
         tableName,
@@ -1736,8 +1736,8 @@ class MTConnector extends EventEmitter {
         state: t.status || t.state || t.Status || t.State,
         hall: t.hall || t.Hall || '',
         summary,
-        // 換靴時重置；同靴內保留最長路史
-        listHistory: shoeSwitched ? listHistory
+        // 換靴時：有新資料才重置；同靴內保留最長路史
+        listHistory: (shoeSwitched && listHistory.length > 0) ? listHistory
           : (existingInfo && existingInfo.listHistory && existingInfo.listHistory.length > listHistory.length)
             ? existingInfo.listHistory : (listHistory.length > 0 ? listHistory : (existingInfo && existingInfo.listHistory) || []),
         _raw: t
@@ -1853,7 +1853,7 @@ class MTConnector extends EventEmitter {
       const existing = this.tables.get(tableId);
       const newShoe = table.shoe || (trend && trend.current_shoe) || null;
       const shoeSwitched = newShoe && existing && existing.shoe && String(existing.shoe) !== String(newShoe);
-      if (shoeSwitched) console.log(`🔄 ${tableId} 換靴 ${existing.shoe}→${newShoe}，清除舊路`);
+      if (shoeSwitched) console.log(`🔄 ${tableId} 換靴 ${existing.shoe}→${newShoe}，${listHistory.length > 0 ? '清除舊路' : '保留舊路待新靴資料'}`);
       const info = {
         tableId: tableId,
         tableName: table.table_name || tableId,
@@ -1865,8 +1865,8 @@ class MTConnector extends EventEmitter {
         hall: table.hall,
         gameTypeId: table.gametype_id,
         summary: { total: totalRound, banker: listHistory.filter(g=>g==='B').length, player: listHistory.filter(g=>g==='P').length, tie: listHistory.filter(g=>g==='T').length },
-        // 換靴時重置；同靴內保留最長路史
-        listHistory: shoeSwitched ? listHistory
+        // 換靴時：有新資料才重置；同靴內保留最長路史
+        listHistory: (shoeSwitched && listHistory.length > 0) ? listHistory
           : (existing && existing.listHistory && existing.listHistory.length > listHistory.length)
             ? existing.listHistory : (listHistory.length > 0 ? listHistory : (existing && existing.listHistory) || []),
         _raw: table
