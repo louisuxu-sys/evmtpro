@@ -163,11 +163,33 @@ console.log('✅ 等待 MT 連線建立桌台...');
 
 // ===== Webhook 診斷緩衝區 =====
 const recentWebhooks = [];
+const recentReplies = [];
 function logWebhookEvent(info) {
   recentWebhooks.push({ ts: new Date().toISOString(), ...info });
   if (recentWebhooks.length > 15) recentWebhooks.shift();
 }
+function logReply(info) {
+  recentReplies.push({ ts: new Date().toISOString(), ...info });
+  if (recentReplies.length > 20) recentReplies.shift();
+}
 app.get('/api/debug/webhook-log', (req, res) => res.json(recentWebhooks));
+app.get('/api/debug/reply-log', (req, res) => res.json(recentReplies));
+app.get('/api/test/verify-token', async (req, res) => {
+  if (!lineClient) return res.json({ ok: false, error: 'lineClient not ready' });
+  try {
+    const https = require('https');
+    const token = process.env.LINE_CHANNEL_ACCESS_TOKEN || '';
+    const result = await new Promise((resolve, reject) => {
+      const r = https.request({ hostname: 'api.line.me', path: '/v2/bot/info', headers: { Authorization: `Bearer ${token}` } }, (res2) => {
+        let d = '';
+        res2.on('data', c => d += c);
+        res2.on('end', () => resolve({ status: res2.statusCode, body: d }));
+      });
+      r.on('error', reject); r.end();
+    });
+    res.json({ ok: result.status === 200, status: result.status, body: JSON.parse(result.body) });
+  } catch (e) { res.json({ ok: false, error: e.message }); }
+});
 app.get('/api/debug/line-status', (req, res) => {
   const token = process.env.LINE_CHANNEL_ACCESS_TOKEN || '';
   res.json({
@@ -409,43 +431,51 @@ async function handleLineEvent(event) {
 
 // LINE 回覆訊息
 async function replyMessage(replyToken, text) {
-  if (!lineClient) { console.error('LINE client 未初始化'); return; }
+  if (!lineClient) { console.error('LINE client 未初始化'); logReply({ fn: 'replyMessage', status: 'no_client' }); return; }
   try {
     await lineClient.replyMessage({
       replyToken,
       messages: [{ type: 'text', text, quickReply: QUICK_REPLY }]
     });
     console.log('✅ 回覆成功');
+    logReply({ fn: 'replyMessage', status: 'ok', textHead: text.substring(0, 30) });
   } catch (err) {
     console.error('❌ LINE reply error:', err.message);
     if (err.statusCode) console.error('  Status:', err.statusCode);
     if (err.body) console.error('  Body:', JSON.stringify(err.body));
+    logReply({ fn: 'replyMessage', status: 'error', error: err.message, statusCode: err.statusCode, body: err.body ? JSON.stringify(err.body).substring(0, 200) : null });
   }
 }
 
 // LINE 回覆 Flex Message
 async function replyFlex(replyToken, flex, targetId) {
-  if (!lineClient) { console.error('LINE client 未初始化'); return; }
+  if (!lineClient) { console.error('LINE client 未初始化'); logReply({ fn: 'replyFlex', status: 'no_client' }); return; }
   try {
     const msg = Object.assign({}, flex, { quickReply: QUICK_REPLY });
     await lineClient.replyMessage({ replyToken, messages: [msg] });
     console.log('✅ Flex 回覆成功');
+    logReply({ fn: 'replyFlex', status: 'ok' });
   } catch (err) {
     console.error('❌ LINE flex reply error:', err.message);
     if (err.body) console.error('  Body:', JSON.stringify(err.body));
+    logReply({ fn: 'replyFlex', status: 'error', error: err.message, statusCode: err.statusCode, body: err.body ? JSON.stringify(err.body).substring(0, 300) : null });
     const errText = `⚠️ 卡片顯示失敗 (${err.message?.substring(0, 60)})
 請重試或輸入「指令」查看說明`;
-    // 降級1：reply token 可能已被消耗，嘗試 replyMessage
     try {
       await lineClient.replyMessage({ replyToken, messages: [{ type: 'text', text: errText }] });
+      logReply({ fn: 'replyFlex_fallback1', status: 'ok' });
     } catch (e2) {
       console.error('降級文字也失敗:', e2.message);
-      // 降級2：改用 pushMessage（不依賴 replyToken）
+      logReply({ fn: 'replyFlex_fallback1', status: 'error', error: e2.message });
       if (targetId) {
         try {
           await lineClient.pushMessage({ to: targetId, messages: [{ type: 'text', text: errText, quickReply: QUICK_REPLY }] });
           console.log('✅ Push fallback 成功');
-        } catch (e3) { console.error('Push fallback 也失敗:', e3.message); }
+          logReply({ fn: 'replyFlex_fallback2_push', status: 'ok' });
+        } catch (e3) {
+          console.error('Push fallback 也失敗:', e3.message);
+          logReply({ fn: 'replyFlex_fallback2_push', status: 'error', error: e3.message });
+        }
       }
     }
   }
