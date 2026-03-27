@@ -836,6 +836,7 @@ app.post('/api/mt/ingest', (req, res) => {
       broadcastWS({ type: 'mt_status', connected: true, mode: 'interceptor' });
     }
 
+    const tablesBefore = new Set(mtConnector.tables.keys());
     let processed = 0;
     for (const msg of msgs) {
       try {
@@ -847,8 +848,9 @@ app.post('/api/mt/ingest', (req, res) => {
         processed++;
       } catch (e) {}
     }
-
-    res.json({ ok: true, processed });
+    // 回傳本次新建的桌台 ID，讓攔截器立即重播快取（server 重啟後自動還原完整歷史）
+    const newTables = [...mtConnector.tables.keys()].filter(id => !tablesBefore.has(id));
+    res.json({ ok: true, processed, resyncNeeded: newTables.length > 0 ? newTables : undefined });
   } catch (err) {
     res.json({ ok: false, error: err.message });
   }
