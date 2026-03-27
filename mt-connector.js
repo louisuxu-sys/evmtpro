@@ -1697,14 +1697,45 @@ class MTConnector extends EventEmitter {
       // 如果無法判斷遊戲類型，先全部收（之後再過濾）
       if (!isBaccarat && gameType && !gameType.includes('bac')) continue;
 
+      // 從 trend.bead_plate2 解碼歷史路（每 2 字元一局：末碼 2=莊 1=閒 3=和）
+      let listHistory = [];
+      const trend = t.trend || t.Trend;
+      if (trend && typeof trend.bead_plate2 === 'string' && trend.bead_plate2.length >= 2) {
+        const bead = trend.bead_plate2;
+        for (let bi = 0; bi + 1 < bead.length; bi += 2) {
+          const code = bead[bi + 1];
+          if (code === '2') listHistory.push('B');
+          else if (code === '1') listHistory.push('P');
+          else if (code === '3') listHistory.push('T');
+        }
+        if (listHistory.length > 0) {
+          console.log(`📜 ${tableId}(${tableName}) bead_plate2 解碼 ${listHistory.length}局: ${listHistory.slice(-5).join('')}`);
+        }
+      }
+
+      // 從 trend 計算 summary
+      let summary = null;
+      if (trend) {
+        const totalRound = parseInt(trend.total_round || trend.totalRound || '0') || listHistory.length;
+        const bc = listHistory.filter(g => g === 'B').length;
+        const pc = listHistory.filter(g => g === 'P').length;
+        const tc = listHistory.filter(g => g === 'T').length;
+        summary = { total: totalRound, banker: bc, player: pc, tie: tc };
+      }
+
+      const existingInfo = this.tables.get(tableId);
       const info = {
         tableId,
         tableName,
         dealer,
-        shoe: t.shoe || t.Shoe || t.shoeNo || null,
-        round: t.round || t.Round || t.roundNo || null,
+        shoe: t.shoe || t.Shoe || t.shoeNo || (trend && trend.current_shoe) || null,
+        round: t.round || t.Round || t.roundNo || (trend && trend.current_round) || null,
         state: t.status || t.state || t.Status || t.State,
         hall: t.hall || t.Hall || '',
+        summary,
+        // 保留較長的歷史（避免短更新覆蓋完整路史）
+        listHistory: (existingInfo && existingInfo.listHistory && existingInfo.listHistory.length > listHistory.length)
+          ? existingInfo.listHistory : (listHistory.length > 0 ? listHistory : (existingInfo && existingInfo.listHistory) || []),
         _raw: t
       };
       this.tables.set(tableId, info);
