@@ -193,7 +193,9 @@ app.post('/webhook', express.raw({ type: '*/*' }), (req, res) => {
   const parsed = JSON.parse(body);
   console.log('📨 Events 數量:', parsed.events ? parsed.events.length : 0);
   if (parsed.events) {
-    parsed.events.forEach(handleLineEvent);
+    parsed.events.forEach(event =>
+      handleLineEvent(event).catch(e => console.error('❌ handleLineEvent 未捕異常:', e.message, e.stack))
+    );
   }
   res.status(200).json({ message: 'OK' });
 });
@@ -218,7 +220,9 @@ async function handleLineEvent(event) {
   const userId = event.source.userId;
   const groupId = event.source.groupId;
   const targetId = groupId || userId;
+  console.log(`💬 LINE msg: "${text}" from ${targetId?.substring(0, 8)}`);
 
+  try {
   // ===== 全廳掃描 =====
   if (text === '全廳' || text === '房間' || text === '廳') {
     const roomList = getRoomListData();
@@ -262,13 +266,16 @@ async function handleLineEvent(event) {
     if (targetLocalId !== null) {
       const engine = tables.get(targetLocalId);
       const mtId = localToMtMap.get(targetLocalId);
+      console.log(`🎯 followMatch lid=${targetLocalId} tn=${engine?.tableName} mtId=${mtId}`);
       userFollowing.set(targetId, { mtTableId: mtId, localId: targetLocalId });
       const mtInfo = mtId ? mtConnector.tables.get(mtId) : null;
       try {
+        console.log(`🔨 buildAnalysisFlex start lid=${targetLocalId}`);
         const flex = buildAnalysisFlex(engine, mtInfo);
+        console.log(`✅ buildAnalysisFlex done, calling replyFlex`);
         await replyFlex(replyToken, flex);
       } catch (e) {
-        console.error('Flex build error:', e.message);
+        console.error('Flex build error:', e.message, e.stack);
         const state = engine.getState();
         await replyMessage(replyToken, `✅ 已開始跟隨「${engine.tableName}」\n荷官: ${state.dealer || '-'}\n\n每手開牌會自動推送\n輸入「取消」停止跟隨`);
       }
@@ -366,6 +373,11 @@ async function handleLineEvent(event) {
   await replyMessage(replyToken, `🎰 百家之眼
 輸入「全廳」查看房間
 輸入「指令」查看功能`);
+
+  } catch (outerErr) {
+    console.error('❌ handleLineEvent 外層錯誤:', outerErr.message, outerErr.stack);
+    try { await replyMessage(replyToken, `⚠️ 系統錯誤，請稍後再試 (${outerErr.message?.substring(0, 50)})`); } catch(_) {}
+  }
 }
 
 // LINE 回覆訊息
