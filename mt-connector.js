@@ -1337,8 +1337,8 @@ class MTConnector extends EventEmitter {
         const listLen = d.List ? d.List.length : 0;
         console.log(`📋 房間 ${displayNum} (${tableId}) 共${summary.Total}局 莊${summary.Banker} 閒${summary.Player} 和${summary.Tie} | D.List=${listLen}筆`);
 
-        // 記錄首個 G 值樣本（除錯用）
-        if (d.List && d.List[0] && !this._gLogged) { this._gLogged = true; console.log(`📊 List G樣本: ${JSON.stringify(d.List.slice(0,3).map(r=>r.G))}`); }
+        // 記錄每桌首次 G 值樣本（除錯用）
+        if (d.List && d.List[0]) { if (!this._gLoggedTables) this._gLoggedTables = new Set(); if (!this._gLoggedTables.has(tableId)) { this._gLoggedTables.add(tableId); console.log(`📊 ${tableId}(房${displayNum}) G樣本: ${JSON.stringify(d.List.slice(0,5).map(r=>r.G))}`); } }
       } else {
         // 更新統計
         const info = this.tables.get(tableId);
