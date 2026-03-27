@@ -1368,13 +1368,10 @@ class MTConnector extends EventEmitter {
         const info = this.tables.get(tableId);
         // 正規化完整路史供 Flex 路盤直接使用
         // 只在新 List 較長（或首次）時才覆寫，防止短 List 更新清除完整靴記錄
-        // 例外：新靴開始（Total ≤ 3 且舊紀錄 > 10）時重置
         const newListHistory = d.List.map(r => this._normalizeG(r.G));
-        const isNewShoe = info && info.listHistory && info.listHistory.length > 10 && newListHistory.length <= 3;
-        if (info && (isNewShoe || !info.listHistory || newListHistory.length >= info.listHistory.length)) {
+        if (info && (!info.listHistory || newListHistory.length >= info.listHistory.length)) {
           info.listHistory = newListHistory;
-          if (isNewShoe) console.log(`🔄 ${tableId} 新靴開始，重置 listHistory`);
-          else console.log(`📝 ${tableId} listHistory 更新: ${newListHistory.length}筆`);
+          console.log(`📝 ${tableId} listHistory 更新: ${newListHistory.length}筆`);
         } else if (info && info.listHistory) {
           console.log(`⏭️  ${tableId} 跳過短 List(${newListHistory.length}) 保留既有(${info.listHistory.length})筆`);
         }
