@@ -1829,16 +1829,37 @@ class MTConnector extends EventEmitter {
       // 只收百家樂桌 (BAG=百家, BAV=視訊百家)，排除骰寶/龍虎/牛牛等
       if (!tableId.startsWith('BA')) continue;
 
+      // 從 trend.bead_plate2 解碼歷史路（末碼 2=莊 1=閒 3=和）
+      let listHistory = [];
+      const trend = table.trend || table.Trend;
+      if (trend && typeof trend.bead_plate2 === 'string' && trend.bead_plate2.length >= 2) {
+        const bead = trend.bead_plate2;
+        for (let bi = 0; bi + 1 < bead.length; bi += 2) {
+          const code = bead[bi + 1];
+          if (code === '2') listHistory.push('B');
+          else if (code === '1') listHistory.push('P');
+          else if (code === '3') listHistory.push('T');
+        }
+        if (listHistory.length > 0) {
+          console.log(`📜 ${tableId}(${table.table_name}) bead2 ${listHistory.length}局: ${listHistory.slice(-5).join('')}`);
+        }
+      }
+
+      const totalRound = trend ? (parseInt(trend.total_round || '0') || listHistory.length) : listHistory.length;
+      const existing = this.tables.get(tableId);
       const info = {
         tableId: tableId,
         tableName: table.table_name || tableId,
         dealer: this.parseDealerInfo(table.dealer),
-        shoe: table.shoe || null,
-        round: table.round || null,
+        shoe: table.shoe || (trend && trend.current_shoe) || null,
+        round: table.round || (trend && trend.current_round) || null,
         state: table.state,
         roomId: table.room_id,
         hall: table.hall,
         gameTypeId: table.gametype_id,
+        summary: { total: totalRound, banker: listHistory.filter(g=>g==='B').length, player: listHistory.filter(g=>g==='P').length, tie: listHistory.filter(g=>g==='T').length },
+        listHistory: (existing && existing.listHistory && existing.listHistory.length > listHistory.length)
+          ? existing.listHistory : (listHistory.length > 0 ? listHistory : (existing && existing.listHistory) || []),
         _raw: table
       };
       this.tables.set(tableId, info);
