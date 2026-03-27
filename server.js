@@ -784,6 +784,24 @@ app.post('/admin/navigate', checkAdmin, express.json(), async (req, res) => {
   }
 });
 
+// 診斷：查看各桌目前資料筆數
+app.get('/api/debug/tables', (req, res) => {
+  const result = [];
+  for (const [localId, engine] of tables) {
+    const mtId = localToMtMap.get(localId);
+    const mtInfo = mtId ? mtConnector.tables.get(mtId) : null;
+    result.push({
+      localId,
+      name: engine.tableName,
+      engineHands: engine.handCount,
+      listHistory: mtInfo && mtInfo.listHistory ? mtInfo.listHistory.length : 0,
+      summary: mtInfo && mtInfo.summary ? mtInfo.summary : null,
+      recent5: mtInfo && mtInfo.listHistory ? mtInfo.listHistory.slice(-5) : [],
+    });
+  }
+  res.json(result);
+});
+
 // 接收本地攔截器 / 瀏覽器擴充功能轉發的 MT WebSocket 訊息
 const INGEST_API_KEY = process.env.INGEST_API_KEY || '';
 
