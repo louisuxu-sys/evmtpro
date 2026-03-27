@@ -33,6 +33,18 @@ function dotBox(result, size) {
   return { type: 'box', layout: 'vertical', backgroundColor: bg, cornerRadius: '50px', width: size, height: size, contents: [{ type: 'filler' }] };
 }
 
+function circleNumBox(result, num, size) {
+  size = size || '18px';
+  const bg = result === 'B' ? COLOR_B : result === 'P' ? COLOR_P : COLOR_T;
+  return {
+    type: 'box', layout: 'vertical',
+    backgroundColor: bg, cornerRadius: 'xxl',
+    width: size, height: size,
+    justifyContent: 'center', alignItems: 'center',
+    contents: [{ type: 'text', text: String(num), color: '#ffffff', size: 'xxs', align: 'center', gravity: 'center', weight: 'bold' }]
+  };
+}
+
 // ===== 珠盤路 (6 行，由上到下填滿每欄後再往右) =====
 function buildBeadRoadFlex(beadRoad) {
   const ROWS = 6;
@@ -63,14 +75,13 @@ function buildBeadRoadFlex(beadRoad) {
 function buildBigRoadFlex(bigRoad) {
   const MAX_COLS = 12;
   const MAX_ROWS = 6;
+  const CELL = '18px';
 
   if (bigRoad.length === 0) {
     return [{ type: 'text', text: '（無資料）', size: 'xs', color: '#aaaaaa' }];
   }
 
   const maxCol = Math.max(...bigRoad.map(e => e.col));
-  const displayCols = Math.min(maxCol + 1, MAX_COLS);
-  const sz = displayCols <= 15 ? '12px' : displayCols <= 25 ? '8px' : displayCols <= 40 ? '6px' : '4px';
   const startCol = Math.max(0, maxCol - MAX_COLS + 1);
 
   const grid = {};
@@ -78,7 +89,7 @@ function buildBigRoadFlex(bigRoad) {
     const c = e.col - startCol;
     if (c < 0) continue;
     if (!grid[c]) grid[c] = {};
-    grid[c][e.row] = e.result;
+    grid[c][e.row] = { result: e.result, num: e.num };
   }
 
   const colBoxes = [];
@@ -86,14 +97,14 @@ function buildBigRoadFlex(bigRoad) {
     if (!grid[c]) continue;
     const cells = [];
     for (let r = 0; r < MAX_ROWS; r++) {
-      const res = grid[c][r];
-      cells.push(res ? dotBox(res, sz) : emptyCell(sz));
+      const cell = grid[c][r];
+      cells.push(cell ? circleNumBox(cell.result, cell.num, CELL) : emptyCell(CELL));
     }
-    colBoxes.push({ type: 'box', layout: 'vertical', contents: cells, spacing: 'none', flex: 0, width: sz, alignItems: 'center' });
+    colBoxes.push({ type: 'box', layout: 'vertical', contents: cells, spacing: 'xs', flex: 0, width: CELL, alignItems: 'center' });
   }
   colBoxes.push({ type: 'filler' });
 
-  return [{ type: 'box', layout: 'horizontal', contents: colBoxes, spacing: 'none', paddingAll: 'xs', backgroundColor: '#F8F9FA', cornerRadius: 'md' }];
+  return [{ type: 'box', layout: 'horizontal', contents: colBoxes, spacing: 'xs', paddingAll: 'xs', backgroundColor: '#F8F9FA', cornerRadius: 'md' }];
 }
 
 // ===== 預測演算法 =====
@@ -185,26 +196,27 @@ function historyToBeadRoad(history) {
 function historyToBigRoad(history) {
   const MAX_ROWS = 6;
   const grid = new Map();
-  let r = 0, c = 0, vertCol = 0, tailing = false, last = null, first = true;
+  let r = 0, c = 0, vertCol = 0, tailing = false, last = null, first = true, streakNum = 0;
   for (const h of history) {
     if (h === 'T') continue;
-    if (first) { grid.set(`${r},${c}`, h); first = false; last = h; continue; }
+    if (first) { streakNum = 1; grid.set(`${r},${c}`, { result: h, num: streakNum }); first = false; last = h; continue; }
     if (h === last) {
+      streakNum++;
       if (!tailing && r + 1 < MAX_ROWS && !grid.has(`${r+1},${c}`)) { r++; }
       else { tailing = true; c++; while (grid.has(`${r},${c}`)) c++; }
     } else {
-      tailing = false;
+      tailing = false; streakNum = 1;
       let nc = vertCol + 1;
       r = 0;
       while (grid.has(`${r},${nc}`)) nc++;
       c = nc; vertCol = c;
     }
-    grid.set(`${r},${c}`, h); last = h;
+    grid.set(`${r},${c}`, { result: h, num: streakNum }); last = h;
   }
   const road = [];
-  for (const [key, result] of grid) {
+  for (const [key, data] of grid) {
     const [row, col] = key.split(',').map(Number);
-    road.push({ col, row, result });
+    road.push({ col, row, result: data.result, num: data.num });
   }
   return road;
 }
@@ -301,10 +313,6 @@ function buildAnalysisFlex(engine, mtInfo, mode) {
             ]
           },
           { type: 'separator' },
-          // 珠盤路
-          { type: 'text', text: '珠盤路', size: 'sm', weight: 'bold', color: '#333333', margin: 'sm' },
-          ...buildBeadRoadFlex(beadRoad),
-          { type: 'separator', margin: 'sm' },
           // 大路
           { type: 'text', text: '大路', size: 'sm', weight: 'bold', color: '#333333', margin: 'sm' },
           ...buildBigRoadFlex(bigRoad),
