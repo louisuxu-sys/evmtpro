@@ -784,6 +784,23 @@ app.post('/admin/navigate', checkAdmin, express.json(), async (req, res) => {
   }
 });
 
+// 診斷：MT connector 內部狀態（DD key 格式、G 值樣本）
+app.get('/api/debug/connector', (req, res) => {
+  res.json({
+    ddKeyLog: mtConnector._ddKeyLog ? [...mtConnector._ddKeyLog] : [],
+    unknownG:  mtConnector._unknownG  ? [...mtConnector._unknownG]  : [],
+    tableCount: mtConnector.tables.size,
+    localToMtMap: [...localToMtMap.entries()].slice(0, 5),
+    connectorTables: [...mtConnector.tables.entries()].slice(0, 3).map(([id, info]) => ({
+      tableId: id,
+      tableName: info.tableName,
+      listLen: info.listHistory ? info.listHistory.length : 0,
+      summaryPresent: !!info.summary,
+      recent3G: info.listHistory ? info.listHistory.slice(-3) : []
+    }))
+  });
+});
+
 // 診斷：查看各桌目前資料筆數
 app.get('/api/debug/tables', (req, res) => {
   const result = [];
