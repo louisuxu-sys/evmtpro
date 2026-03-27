@@ -1787,6 +1787,13 @@ class MTConnector extends EventEmitter {
         `莊[${bankerCards.map(c => this.formatCard(c)).join(' ')}]=${bankerTotal} ` +
         `→ ${winner === 'B' ? '莊贏' : winner === 'P' ? '閒贏' : '和'}`);
 
+      // 即時更新 listHistory
+      const tableInfo = this.tables.get(tableId);
+      if (tableInfo && winner) {
+        if (!tableInfo.listHistory) tableInfo.listHistory = [];
+        tableInfo.listHistory.push(winner);
+      }
+
       this.emit('game_result', {
         tableId,
         shoe: data.shoe || data.Shoe || data.shoeNo,
