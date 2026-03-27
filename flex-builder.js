@@ -36,7 +36,7 @@ function dotBox(result, size) {
 // ===== 珠盤路 (6 行，由上到下填滿每欄後再往右) =====
 function buildBeadRoadFlex(beadRoad) {
   const ROWS = 6;
-  const MAX_COLS = 15;
+  const MAX_COLS = 8;
   const CELL = '18px';
   const recent = beadRoad.slice(-(ROWS * MAX_COLS));
 
@@ -61,7 +61,7 @@ function buildBeadRoadFlex(beadRoad) {
 
 // ===== 大路 (每欄向下疊加，支援 tailing) =====
 function buildBigRoadFlex(bigRoad) {
-  const MAX_COLS = 80;
+  const MAX_COLS = 12;
   const MAX_ROWS = 6;
 
   if (bigRoad.length === 0) {
