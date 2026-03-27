@@ -811,6 +811,8 @@ app.get('/api/debug/tables', (req, res) => {
   for (const [localId, engine] of tables) {
     const mtId = localToMtMap.get(localId);
     const mtInfo = mtId ? mtConnector.tables.get(mtId) : null;
+    const raw = mtInfo && mtInfo._raw;
+    const bead2 = raw && raw.trend && raw.trend.bead_plate2;
     result.push({
       localId,
       name: engine.tableName,
@@ -818,6 +820,10 @@ app.get('/api/debug/tables', (req, res) => {
       listHistory: mtInfo && mtInfo.listHistory ? mtInfo.listHistory.length : 0,
       summary: mtInfo && mtInfo.summary ? mtInfo.summary : null,
       recent5: mtInfo && mtInfo.listHistory ? mtInfo.listHistory.slice(-5) : [],
+      first5: mtInfo && mtInfo.listHistory ? mtInfo.listHistory.slice(0, 5) : [],
+      bead2len: bead2 ? bead2.length / 2 : 0,
+      bead2head: bead2 ? bead2.substring(0, 10) : null,
+      bead2tail: bead2 ? bead2.substring(bead2.length - 10) : null,
     });
   }
   res.json(result);
