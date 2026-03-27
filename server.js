@@ -161,6 +161,24 @@ mtConnector.on('error', (err) => {
 // 不再初始化示範桌台 - 改由 MT 自動建立
 console.log('✅ 等待 MT 連線建立桌台...');
 
+// ===== Webhook 診斷緩衝區 =====
+const recentWebhooks = [];
+function logWebhookEvent(info) {
+  recentWebhooks.push({ ts: new Date().toISOString(), ...info });
+  if (recentWebhooks.length > 15) recentWebhooks.shift();
+}
+app.get('/api/debug/webhook-log', (req, res) => res.json(recentWebhooks));
+app.get('/api/debug/line-status', (req, res) => {
+  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN || '';
+  res.json({
+    lineClientReady: !!lineClient,
+    tokenHead: token ? token.substring(0, 8) + '...' : '(未設定)',
+    channelSecretSet: !!(process.env.LINE_CHANNEL_SECRET),
+    userFollowingCount: userFollowing.size,
+    tablesCount: tables.size
+  });
+});
+
 // ===== LINE Webhook - GET (LINE Verify 用) =====
 app.get('/webhook', (req, res) => {
   res.status(200).send('OK');
@@ -175,9 +193,11 @@ app.post('/webhook', express.raw({ type: '*/*' }), (req, res) => {
   }
 
   const signature = req.headers['x-line-signature'];
+  logWebhookEvent({ step: 'received', hasSig: !!signature, ip: req.ip });
   console.log('📨 Webhook 收到請求, signature:', signature ? '有' : '無');
 
   if (!signature) {
+    logWebhookEvent({ step: 'no_signature' });
     return res.status(200).json({ message: 'OK' });
   }
 
@@ -186,12 +206,15 @@ app.post('/webhook', express.raw({ type: '*/*' }), (req, res) => {
 
   if (!line.validateSignature(body, lineConfig.channelSecret, signature)) {
     console.error('❌ Webhook 簽名驗證失敗');
+    logWebhookEvent({ step: 'sig_fail' });
     return res.status(403).json({ message: 'Invalid signature' });
   }
 
   console.log('✅ Webhook 簽名驗證通過');
   const parsed = JSON.parse(body);
-  console.log('📨 Events 數量:', parsed.events ? parsed.events.length : 0);
+  const evtCount = parsed.events ? parsed.events.length : 0;
+  console.log('📨 Events 數量:', evtCount);
+  logWebhookEvent({ step: 'ok', evtCount, texts: (parsed.events || []).map(e => e.message?.text).filter(Boolean) });
   if (parsed.events) {
     parsed.events.forEach(event =>
       handleLineEvent(event).catch(e => console.error('❌ handleLineEvent 未捕異常:', e.message, e.stack))
@@ -273,11 +296,15 @@ async function handleLineEvent(event) {
         console.log(`🔨 buildAnalysisFlex start lid=${targetLocalId}`);
         const flex = buildAnalysisFlex(engine, mtInfo);
         console.log(`✅ buildAnalysisFlex done, calling replyFlex`);
-        await replyFlex(replyToken, flex);
+        await replyFlex(replyToken, flex, targetId);
       } catch (e) {
         console.error('Flex build error:', e.message, e.stack);
         const state = engine.getState();
-        await replyMessage(replyToken, `✅ 已開始跟隨「${engine.tableName}」\n荷官: ${state.dealer || '-'}\n\n每手開牌會自動推送\n輸入「取消」停止跟隨`);
+        try {
+          await lineClient.replyMessage({ replyToken, messages: [{ type: 'text', text: `✅ 已開始跟隨「${engine.tableName}」\n荷官: ${state.dealer || '-'}`, quickReply: QUICK_REPLY }] });
+        } catch (_) {
+          if (targetId && lineClient) await lineClient.pushMessage({ to: targetId, messages: [{ type: 'text', text: `✅ 已跟隨「${engine.tableName}」`, quickReply: QUICK_REPLY }] }).catch(()=>{});
+        }
       }
     } else {
       await replyMessage(replyToken, `❌ 找不到「${inputKey}」房
@@ -304,7 +331,7 @@ async function handleLineEvent(event) {
       const mtInfo = mtId ? mtConnector.tables.get(mtId) : null;
       try {
         const flex = buildAnalysisFlex(engine, mtInfo);
-        await replyFlex(replyToken, flex);
+        await replyFlex(replyToken, flex, targetId);
       } catch (e) {
         await replyMessage(replyToken, `❌ 分析建立失敗: ${e.message}`);
       }
@@ -335,7 +362,7 @@ async function handleLineEvent(event) {
     }
     try {
       const flex = buildHandResultFlex(eng, mtInfo, lastD);
-      await replyFlex(replyToken, flex);
+      await replyFlex(replyToken, flex, targetId);
     } catch (e) {
       const ev = st.ev || 0;
       await replyMessage(replyToken, formatHandResult(followInfo.localId, eng, ev, lastD));
@@ -397,7 +424,7 @@ async function replyMessage(replyToken, text) {
 }
 
 // LINE 回覆 Flex Message
-async function replyFlex(replyToken, flex) {
+async function replyFlex(replyToken, flex, targetId) {
   if (!lineClient) { console.error('LINE client 未初始化'); return; }
   try {
     const msg = Object.assign({}, flex, { quickReply: QUICK_REPLY });
@@ -406,11 +433,21 @@ async function replyFlex(replyToken, flex) {
   } catch (err) {
     console.error('❌ LINE flex reply error:', err.message);
     if (err.body) console.error('  Body:', JSON.stringify(err.body));
-    // 降級：改發文字訊息，避免使用者看到空白
+    const errText = `⚠️ 卡片顯示失敗 (${err.message?.substring(0, 60)})
+請重試或輸入「指令」查看說明`;
+    // 降級1：reply token 可能已被消耗，嘗試 replyMessage
     try {
-      await lineClient.replyMessage({ replyToken, messages: [{ type: 'text', text: `⚠️ 卡片顯示失敗 (${err.message?.substring(0, 60)})
-請重試或輸入「指令」查看說明` }] });
-    } catch (e2) { console.error('降級文字也失敗:', e2.message); }
+      await lineClient.replyMessage({ replyToken, messages: [{ type: 'text', text: errText }] });
+    } catch (e2) {
+      console.error('降級文字也失敗:', e2.message);
+      // 降級2：改用 pushMessage（不依賴 replyToken）
+      if (targetId) {
+        try {
+          await lineClient.pushMessage({ to: targetId, messages: [{ type: 'text', text: errText, quickReply: QUICK_REPLY }] });
+          console.log('✅ Push fallback 成功');
+        } catch (e3) { console.error('Push fallback 也失敗:', e3.message); }
+      }
+    }
   }
 }
 
