@@ -63,10 +63,12 @@ mtConnector.on('tables_list', (mtTables) => {
       tables.set(localId, engine);
       mtTableIdMap.set(mt.tableId, localId);
       localToMtMap.set(localId, mt.tableId);
-      // 把 listHistory 直接灌進 engine（game_result 歷史事件在 engine 建立前就發出，會被丟棄）
+      // 把 listHistory 直接灌進 engine（以 summary.total 為上限，避免載入過多靴體資料）
       if (mt.listHistory && mt.listHistory.length > 0) {
-        for (const winner of mt.listHistory) engine.recordHand(winner, [], []);
-        console.log(`  📜 歷史路載入: 第${localId}廳 ${mt.listHistory.length}局`);
+        const summaryTotal = mt.summary ? (mt.summary.total || 0) : 0;
+        const cap = summaryTotal > 0 ? Math.min(mt.listHistory.length, summaryTotal) : mt.listHistory.length;
+        for (let i = 0; i < cap; i++) engine.recordHand(mt.listHistory[i], [], []);
+        console.log(`  📜 歷史路載入: 第${localId}廳 ${engine.handCount}局 (summary=${summaryTotal})`);
       }
       console.log(`  ✅ 第${localId}廳: ${mt.tableName} (荷官: ${mt.dealer?.name || '-'})`);
     } else {
@@ -74,12 +76,18 @@ mtConnector.on('tables_list', (mtTables) => {
       const localId = mtTableIdMap.get(mt.tableId);
       const engine = tables.get(localId);
       if (engine && mt.dealer) engine.setDealer(mt.dealer.name || '');
-      // 補充歷史：listHistory 比 engine 長時，把差額補進去（server 重啟後 game_result 可能先發一筆，這裡補齊其餘的）
-      if (engine && mt.listHistory && mt.listHistory.length > engine.handCount) {
-        const missing = mt.listHistory.slice(engine.handCount);
-        for (const winner of missing) engine.recordHand(winner, [], []);
-        console.log(`  📜 補充歷史: 第${localId}廳 +${missing.length}局 (共${engine.handCount}局)`);
+      // 洗牌偵測：MT summary.total 遠小於 engine.handCount → 新靴
+      const summaryTotal = mt.summary ? (mt.summary.total || 0) : 0;
+      if (engine && summaryTotal > 0 && summaryTotal < engine.handCount - 3) {
+        console.log(`🔀 洗牌偵測: 第${localId}廳 engine=${engine.handCount}局 → MT=${summaryTotal}局，重置`);
+        engine.resetShoe();
+        if (mt.listHistory && mt.listHistory.length > 0) {
+          const cap = Math.min(mt.listHistory.length, summaryTotal);
+          for (let i = 0; i < cap; i++) engine.recordHand(mt.listHistory[i], [], []);
+          console.log(`  📜 洗牌後重載: 第${localId}廳 ${engine.handCount}局`);
+        }
       }
+      // 不再「補充歷史」— 新局統一由 game_result 事件處理，防止重複計算
     }
   }
   const allStates = [];
@@ -112,9 +120,28 @@ mtConnector.on('game_result', (data) => {
   if (!localId || !tables.has(localId)) return;
 
   const engine = tables.get(localId);
+  const hasCards = data.playerCards && data.playerCards.length >= 2;
+
+  // 重複去抖：若牌面資料在同一手到達兩次（先無牌後有牌），只更新牌面，不重複計數
+  const lastDetail = engine.handDetails[engine.handDetails.length - 1];
+  const recentMs = Date.now() - (engine._lastHandTime || 0);
+  if (hasCards && lastDetail && recentMs < 8000 &&
+      (!lastDetail.playerCards || lastDetail.playerCards.length < 2) &&
+      lastDetail.result === data.winner) {
+    // 只補牌面，不新增一手
+    lastDetail.playerCards = data.playerCards;
+    lastDetail.bankerCards = data.bankerCards || [];
+    lastDetail.playerTotal = data.playerTotal || 0;
+    lastDetail.bankerTotal = data.bankerTotal || 0;
+    console.log(`🃏 補牌面: 第${localId}廳 第${engine.handCount}局`);
+    broadcastWS({ type: 'update', tableId: localId, state: engine.getState() });
+    pushToFollowers(data.tableId, localId, engine, engine.calculateEV(), lastDetail);
+    return;
+  }
+
+  engine._lastHandTime = Date.now();
   const ev = engine.recordHand(data.winner, data.playerCards, data.bankerCards);
   const state = engine.getState();
-  const lastDetail = state.handDetails[state.handDetails.length - 1];
 
   // 廣播到前端
   broadcastWS({ type: 'update', tableId: localId, state });
@@ -732,16 +759,23 @@ app.post('/api/mt-data', (req, res) => {
         const localId = tables.size + 1;
         const engine = new BaccaratEngine(localId, t.tableName || `MT-${tableId}`);
         engine._mtTableId = tableId;
-        if (t.dealer) engine.setDealer(t.dealer);
+        engine._hall = t.hall;
         tables.set(localId, engine);
         mtTableIdMap.set(tableId, localId);
         localToMtMap.set(localId, tableId);
-        mtConnector.tables.set(tableId, t);
-        console.log(`  ✅ 第${localId}廳: ${t.tableName} | 荷官: ${t.dealer || '-'} (Python)`);
+        // 把 listHistory 直接灌進 engine（以 summary.total 為上限，避免載入過多靴體資料）
+        if (t.listHistory && t.listHistory.length > 0) {
+          const summaryTotal = t.summary ? (t.summary.total || 0) : 0;
+          const cap = summaryTotal > 0 ? Math.min(t.listHistory.length, summaryTotal) : t.listHistory.length;
+          for (let i = 0; i < cap; i++) engine.recordHand(t.listHistory[i], [], []);
+          console.log(`  📜 歷史路載入: 第${localId}廳 ${engine.handCount}局 (summary=${summaryTotal})`);
+        }
+        console.log(`  ✅ 第${localId}廳: ${t.tableName} (荷官: ${t.dealer?.name || '-'})`);
       } else {
+        // 更新荷官
         const localId = mtTableIdMap.get(tableId);
         const engine = tables.get(localId);
-        if (engine && t.dealer) engine.setDealer(t.dealer);
+        if (engine && t.dealer) engine.setDealer(t.dealer.name || '');
         mtConnector.tables.set(tableId, t);
       }
     }
@@ -754,11 +788,21 @@ app.post('/api/mt-data', (req, res) => {
     if (localId && tables.has(localId)) {
       const engine = tables.get(localId);
       const winner = data.winner === 'B' ? 'B' : data.winner === 'P' ? 'P' : 'T';
+      // Python 路徑重複去抖：8秒內同贏者跳過（MT WS 路徑可能先發）
+      const pyLastDetail = engine.handDetails[engine.handDetails.length - 1];
+      const pyRecentMs = Date.now() - (engine._lastHandTime || 0);
+      if (pyLastDetail && pyRecentMs < 8000 && pyLastDetail.result === winner) {
+        console.log(`⏭️ Python重複跳過: 第${localId}廳 第${engine.handCount}局`);
+        // 仅更新 summary，不計新一手
+        if (data.summary) { const mt = mtConnector.tables.get(data.tableId); if (mt) mt.summary = data.summary; }
+        return res.json({ ok: true });
+      }
+      engine._lastHandTime = Date.now();
       const ev = engine.recordHand(winner, null, null);
       const state = engine.getState();
       broadcastWS({ type: 'update', tableId: localId, state });
       pushToFollowers(data.tableId, localId, engine, ev, state.handDetails[state.handDetails.length - 1]);
-      console.log(`🃏 Python開牌: 第${localId}廳 → ${winner === 'B' ? '莊' : winner === 'P' ? '閒' : '和'}`);
+      console.log(`🃏 Python開牌: 第${localId}廳 → ${winner === 'B' ? '莊' : winner === 'P' ? '閑' : '和'} (第${engine.handCount}局)`);
     }
     // 更新 summary
     if (data.summary && data.tableId) {
