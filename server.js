@@ -275,16 +275,23 @@ async function handleLineEvent(event) {
   try {
   // ===== 管理員指令 (永遠可用) =====
   if (userManager.isAdmin(userId)) {
-    const genMatch = text.match(/^生成序號\s*(\d+)$/);
+    const genMatch = text.match(/^產生序號\s*(\d+)D\s*(\d+)$/i);
     if (genMatch) {
-      const result = userManager.generateCode(parseInt(genMatch[1]), userId);
-      if (result.ok) {
+      const days = parseInt(genMatch[1]);
+      const qty  = Math.min(parseInt(genMatch[2]), 20); // 最多一次20組
+      const codes = [];
+      let lastErr = null;
+      for (let i = 0; i < qty; i++) {
+        const result = userManager.generateCode(days, userId);
+        if (result.ok) codes.push(result.code);
+        else { lastErr = result.error; break; }
+      }
+      if (codes.length > 0) {
         await replyMessage(replyToken,
-          `✅ 序號已生成\n` +
-          `🔑 ${result.code}\n` +
-          `📅 有效期：${result.days} 天`);
+          `✅ 已產生 ${codes.length} 組 ${days} 天序號\n─────\n` +
+          codes.map((c, i) => `${i+1}. ${c}`).join('\n'));
       } else {
-        await replyMessage(replyToken, `❌ 生成失敗：${result.error}`);
+        await replyMessage(replyToken, `❌ 產生失敗：${lastErr}`);
       }
       return;
     }
@@ -320,11 +327,7 @@ async function handleLineEvent(event) {
 
   if (text === '儲值' || text === '充值') {
     await replyMessage(replyToken,
-      `💰 儲值方案\n` +
-      `─────────────\n` +
-      `📅  1天  |  2天  |  3天\n` +
-      `📅  7天  |  15天  |  30天\n` +
-      `📅  365天\n` +
+      `💰 Yahoo百家AI 儲值\n` +
       `─────────────\n` +
       `請聯絡管理員取得序號\n\n` +
       `兌換方式：\n` +
@@ -515,7 +518,7 @@ async function handleLineEvent(event) {
     if (isAdmin) {
       msg += `\n─────────────\n` +
         `👑 管理員指令\n` +
-        `生成序號 [天數] - 如: 生成序號7\n` +
+        `產生序號 [天數]D [數量] - 如: 產生序號7D 1\n` +
         `查詢 [UID] - 查詢用戶\n` +
         `序號列表 - 查看序號\n` +
         `用戶列表 - 查看用戶`;
@@ -525,9 +528,9 @@ async function handleLineEvent(event) {
   }
 
   // ===== 未知指令 =====
-  await replyMessage(replyToken, `🎰 百家之眼
+  await replyMessage(replyToken, `🎰 歡迎使用Yahoo百家AI
 輸入「全廳」查看房間
-輸入「指令」查看功能`);
+輸入「儲值」進行儲值`);
 
   } catch (outerErr) {
     console.error('❌ handleLineEvent 外層錯誤:', outerErr.message, outerErr.stack);
