@@ -410,16 +410,17 @@ async function handleLineEvent(event) {
       console.log(`🎯 followMatch lid=${targetLocalId} tn=${engine?.tableName} mtId=${mtId}`);
       userFollowing.set(targetId, { mtTableId: mtId, localId: targetLocalId });
       const mtInfo = mtId ? mtConnector.tables.get(mtId) : null;
-      try {
-        const flex = buildTrackingFlex(engine, mtInfo);
-        await replyFlex(replyToken, flex, targetId);
-      } catch (e) {
-        console.error('Tracking flex error:', e.message, e.stack);
-        const state = engine.getState();
+      const st = engine.getState();
+      const lastD = st.handDetails && st.handDetails[st.handDetails.length - 1];
+      if (!lastD) {
+        await replyMessage(replyToken, `✅ 已跟隨「${engine.tableName}」\n等待開局資料，有新結果時自動通知`);
+      } else {
         try {
-          await lineClient.replyMessage({ replyToken, messages: [{ type: 'text', text: `✅ 已跟隨「${engine.tableName}」\n荷官: ${state.dealer || '-'}`, quickReply: QUICK_REPLY }] });
-        } catch (_) {
-          if (targetId && lineClient) await lineClient.pushMessage({ to: targetId, messages: [{ type: 'text', text: `✅ 已跟隨「${engine.tableName}」`, quickReply: QUICK_REPLY }] }).catch(()=>{});
+          const flex = buildHandResultFlex(engine, mtInfo, lastD);
+          await replyFlex(replyToken, flex, targetId);
+        } catch (e) {
+          console.error('Follow flex error:', e.message);
+          await replyMessage(replyToken, `✅ 已跟隨「${engine.tableName}」`);
         }
       }
     } else {
