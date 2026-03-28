@@ -240,8 +240,15 @@ function buildAnalysisFlex(engine, mtInfo, mode) {
   const bigRoad  = historyToBigRoad(liveHistory, livePoints);
   const history  = liveHistory;
 
-  // \u82e5 engine \u7121\u6b77\u53f2\uff0c\u5f9e liveHistory \u88dc\u7b97\u7d71\u8a08
-  if (stats.banker + stats.player + stats.tie === 0 && liveHistory.length > 0) {
+  // 統計以 mtInfo.summary（MT平台權威數據）為優先，非零時直接使用
+  if (mtInfo && mtInfo.summary && mtInfo.summary.total > 0) {
+    stats = {
+      banker: mtInfo.summary.banker || 0,
+      player: mtInfo.summary.player || 0,
+      tie:    mtInfo.summary.tie    || 0,
+    };
+  } else if (stats.banker + stats.player + stats.tie === 0 && liveHistory.length > 0) {
+    // 若 engine 無歷史，從 liveHistory 補算統計
     stats = { banker: 0, player: 0, tie: 0 };
     for (const h of liveHistory) {
       if (h === 'B') stats.banker++;
@@ -251,7 +258,7 @@ function buildAnalysisFlex(engine, mtInfo, mode) {
   }
 
   const _rawN = (mtInfo && mtInfo.tableName) || engine.tableName || '';
-  const tableName = (_rawN && _rawN.includes('\u767e\u5bb6\u6a02')) ? _rawN : `\u767e\u5bb6\u6a02 ${_rawN || (mtInfo && mtInfo.displayNum) || engine.tableId || '?'}`;
+  const tableName = (_rawN && _rawN.includes('百家樂')) ? _rawN : `百家樂 ${_rawN || (mtInfo && mtInfo.displayNum) || engine.tableId || '?'}`;
   const total = stats.banker + stats.player + stats.tie;
 
   const bPct = total > 0 ? (stats.banker / total * 100).toFixed(1) : '45.9';
@@ -381,7 +388,11 @@ function buildHandResultFlex(engine, mtInfo, detail) {
   const winLabel = _w === 'B' ? '莊贏' : _w === 'P' ? '閒贏' : _w === 'T' ? '和局' : '-';
   const winColor = _w === 'B' ? COLOR_B : _w === 'P' ? COLOR_P : _w === 'T' ? COLOR_T : '#888888';
 
-  const total = stats.banker + stats.player + stats.tie;
+  // 統計以 mtInfo.summary（MT平台權威數據）為優先
+  const dispStats = (mtInfo && mtInfo.summary && mtInfo.summary.total > 0)
+    ? { banker: mtInfo.summary.banker || 0, player: mtInfo.summary.player || 0, tie: mtInfo.summary.tie || 0 }
+    : stats;
+  const total = dispStats.banker + dispStats.player + dispStats.tie;
   const evB = (ev && ev.banker != null) ? ev.banker.toFixed(4) : '-';
   const evP = (ev && ev.player != null) ? ev.player.toFixed(4) : '-';
 
@@ -430,7 +441,7 @@ function buildHandResultFlex(engine, mtInfo, detail) {
           // 統計
           {
             type: 'text',
-            text: `莊${stats.banker} 閒${stats.player} 和${stats.tie} 共${total}局  |  EV 莊${evB}/閒${evP}`,
+            text: `莊${dispStats.banker} 閒${dispStats.player} 和${dispStats.tie} 共${total}局  |  EV 莊${evB}/閒${evP}`,
             size: 'xs', color: '#888888', wrap: true
           }
         ].filter(Boolean)
