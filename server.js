@@ -6,7 +6,7 @@ const path = require('path');
 const line = require('@line/bot-sdk');
 const BaccaratEngine = require('./baccarat-engine');
 const MTConnector = require('./mt-connector');
-const { buildAnalysisFlex, buildHandResultFlex, buildRoomCarousel, QUICK_REPLY } = require('./flex-builder');
+const { buildAnalysisFlex, buildHandResultFlex, buildRoomCarousel, buildTrackingFlex, QUICK_REPLY } = require('./flex-builder');
 const UserManager = require('./user-manager');
 
 const app = express();
@@ -411,15 +411,13 @@ async function handleLineEvent(event) {
       userFollowing.set(targetId, { mtTableId: mtId, localId: targetLocalId });
       const mtInfo = mtId ? mtConnector.tables.get(mtId) : null;
       try {
-        console.log(`🔨 buildAnalysisFlex start lid=${targetLocalId}`);
-        const flex = buildAnalysisFlex(engine, mtInfo);
-        console.log(`✅ buildAnalysisFlex done, calling replyFlex`);
+        const flex = buildTrackingFlex(engine, mtInfo);
         await replyFlex(replyToken, flex, targetId);
       } catch (e) {
-        console.error('Flex build error:', e.message, e.stack);
+        console.error('Tracking flex error:', e.message, e.stack);
         const state = engine.getState();
         try {
-          await lineClient.replyMessage({ replyToken, messages: [{ type: 'text', text: `✅ 已開始跟隨「${engine.tableName}」\n荷官: ${state.dealer || '-'}`, quickReply: QUICK_REPLY }] });
+          await lineClient.replyMessage({ replyToken, messages: [{ type: 'text', text: `✅ 已跟隨「${engine.tableName}」\n荷官: ${state.dealer || '-'}`, quickReply: QUICK_REPLY }] });
         } catch (_) {
           if (targetId && lineClient) await lineClient.pushMessage({ to: targetId, messages: [{ type: 'text', text: `✅ 已跟隨「${engine.tableName}」`, quickReply: QUICK_REPLY }] }).catch(()=>{});
         }
