@@ -411,7 +411,10 @@ async function handleLineEvent(event) {
       userFollowing.set(targetId, { mtTableId: mtId, localId: targetLocalId });
       const mtInfo = mtId ? mtConnector.tables.get(mtId) : null;
       const st = engine.getState();
-      const lastD = st.handDetails && st.handDetails[st.handDetails.length - 1];
+      const details = st.handDetails || [];
+      // 優先用有牌面資料的最新一手，沒有則用最後一手
+      const lastD = details.slice().reverse().find(d => d.playerCards && d.playerCards.length >= 2)
+                    || details[details.length - 1];
       if (!lastD) {
         await replyMessage(replyToken, `✅ 已跟隨「${engine.tableName}」\n等待開局資料，有新結果時自動通知`);
       } else {
