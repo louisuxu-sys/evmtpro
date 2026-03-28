@@ -41,7 +41,7 @@ const tables = new Map();           // localId -> BaccaratEngine
 const subscribers = new Set();      // LINE 訂閱者 (EV 警報)
 let mtTableIdMap = new Map();       // MT平台 tableId -> localId
 let localToMtMap = new Map();       // localId -> MT平台 tableId
-const userFollowing = new Map();    // LINE userId -> { mtTableId, localId }
+// userFollowing now persisted via userManager.setFollowing/getFollowing/deleteFollowing
 
 // ===== MT 連線器 =====
 const mtConnector = new MTConnector({
@@ -134,7 +134,7 @@ const PUSH_COOLDOWN_MS = 10000;
 function pushToFollowers(mtTableId, localId, engine, ev, detail) {
   const mtInfo = mtConnector.tables.get(mtTableId);
   const now = Date.now();
-  for (const [userId, info] of userFollowing) {
+  for (const [userId, info] of userManager.following) {
     if (info.mtTableId === mtTableId) {
       // 限速：每用戶每 3 秒最多 1 次推送
       const last = pushCooldown.get(userId) || 0;
@@ -201,7 +201,7 @@ app.get('/api/debug/line-status', (req, res) => {
     lineClientReady: !!lineClient,
     tokenHead: token ? token.substring(0, 8) + '...' : '(未設定)',
     channelSecretSet: !!(process.env.LINE_CHANNEL_SECRET),
-    userFollowingCount: userFollowing.size,
+    userFollowingCount: userManager.following.size,
     tablesCount: tables.size
   });
 });
@@ -408,7 +408,7 @@ async function handleLineEvent(event) {
       const engine = tables.get(targetLocalId);
       const mtId = localToMtMap.get(targetLocalId);
       console.log(`🎯 followMatch lid=${targetLocalId} tn=${engine?.tableName} mtId=${mtId}`);
-      userFollowing.set(targetId, { mtTableId: mtId, localId: targetLocalId });
+      userManager.setFollowing(targetId, { mtTableId: mtId, localId: targetLocalId });
       const mtInfo = mtId ? mtConnector.tables.get(mtId) : null;
       const st = engine.getState();
       const details = st.handDetails || [];
@@ -463,7 +463,7 @@ async function handleLineEvent(event) {
 
   // ===== 繼續分析（免費 pull 模式：回展最新一手牌型）=====
   if (text === '繼續分析' || text === '最新牌型' || text === '追蹤') {
-    const followInfo = userFollowing.get(targetId);
+    const followInfo = userManager.getFollowing(targetId);
     if (!followInfo) {
       await replyMessage(replyToken, '您尚未跟隨任何房間\n請先輸入房號（如：2 或 B01）');
       return;
@@ -492,9 +492,10 @@ async function handleLineEvent(event) {
 
   // ===== 取消跟隨 =====
   if (text === '取消' || text === '取消跟隨' || text === '離開') {
-    if (userFollowing.has(targetId)) {
-      const info = userFollowing.get(targetId);
-      userFollowing.delete(targetId);
+    const _cancelInfo = userManager.getFollowing(targetId);
+    if (_cancelInfo) {
+      const info = _cancelInfo;
+      userManager.deleteFollowing(targetId);
       await replyMessage(replyToken, `❌ 已停止跟隨第${info.localId}廳`);
     } else {
       await replyMessage(replyToken, '目前沒有跟隨任何房間');
