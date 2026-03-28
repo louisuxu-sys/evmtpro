@@ -129,6 +129,7 @@ mtConnector.on('game_result', (data) => {
 // 每用戶推送冷卻（避免 LINE 429）
 const pushCooldown = new Map(); // userId -> lastPushTimestamp
 const PUSH_COOLDOWN_MS = 10000;
+const lastPushedRoom = new Map(); // targetId -> { mtTableId, localId }
 
 // 推送開牌結果給跟隨用戶（每手推送牌型結果）
 function pushToFollowers(mtTableId, localId, engine, ev, detail) {
@@ -140,6 +141,7 @@ function pushToFollowers(mtTableId, localId, engine, ev, detail) {
       const last = pushCooldown.get(userId) || 0;
       if (now - last < PUSH_COOLDOWN_MS) continue;
       pushCooldown.set(userId, now);
+      lastPushedRoom.set(userId, { mtTableId, localId }); // 記录最近推送房間
       try {
         const flex = buildHandResultFlex(engine, mtInfo, detail);
         pushFlex(userId, flex);
@@ -386,10 +388,10 @@ async function handleLineEvent(event) {
     for (const [lid, eng] of tables) {
       const mid = localToMtMap.get(lid);
       const mi = mid ? mtConnector.tables.get(mid) : null;
-      // 比對 displayNum、tableName（去掉"百家樂 "前綴）兩種格式
+      // 比對 displayNum、tableName、本地 lid 三種格式
       const dnKey = mi ? String(mi.displayNum || '').toUpperCase() : '';
       const tnKey = String(eng.tableName || '').replace(/^百家樂\s*/,'').toUpperCase();
-      if (dnKey === inputKey || tnKey === inputKey) {
+      if (dnKey === inputKey || tnKey === inputKey || String(lid) === inputKey) {
         targetLocalId = lid;
         break;
       }
@@ -442,7 +444,7 @@ async function handleLineEvent(event) {
       const mid = localToMtMap.get(lid);
       const mi = mid ? mtConnector.tables.get(mid) : null;
       const dnKey = mi ? String(mi.displayNum || '').toUpperCase() : '';
-      const tnKey = String(eng.tableName || '').replace(/^百家樂\s*/, '').toUpperCase();
+      const tnKey = String(eng.tableName || '').replace(/^百家樂\s*/,'').toUpperCase();
       if (dnKey === inputKey || tnKey === inputKey) { targetLocalId = lid; break; }
     }
     if (targetLocalId !== null) {
@@ -463,7 +465,9 @@ async function handleLineEvent(event) {
 
   // ===== 繼續分析（免費 pull 模式：回展最新一手牌型）=====
   if (text === '繼續分析' || text === '最新牌型' || text === '追蹤') {
-    const followInfo = userManager.getFollowing(targetId);
+    const followInfo = userManager.getFollowing(targetId)
+                     || lastPushedRoom.get(targetId)  // 最近自動推送的房間作為備用
+                     || lastPushedRoom.get(userId);   // 群組中個人 userId 備用
     if (!followInfo) {
       await replyMessage(replyToken, '您尚未跟隨任何房間\n請先輸入房號（如：2 或 B01）');
       return;
