@@ -465,18 +465,31 @@ async function handleLineEvent(event) {
 
   // ===== 繼續分析（免費 pull 模式：回展最新一手牌型）=====
   if (text === '繼續分析' || text === '最新牌型' || text === '追蹤') {
-    const followInfo = userManager.getFollowing(targetId)
-                     || lastPushedRoom.get(targetId)  // 最近自動推送的房間作為備用
-                     || lastPushedRoom.get(userId);   // 群組中個人 userId 備用
+    let followInfo = userManager.getFollowing(targetId)
+                   || lastPushedRoom.get(targetId)
+                   || lastPushedRoom.get(userId);
+    // 沒有跟隨記錄時，自動使用局數最多的桌台（最活躍）
+    if (!followInfo && tables.size > 0) {
+      let bestLid = null, bestCount = -1;
+      for (const [lid, eng] of tables) {
+        if (eng.handCount > bestCount) { bestCount = eng.handCount; bestLid = lid; }
+      }
+      if (bestLid !== null) {
+        followInfo = { mtTableId: localToMtMap.get(bestLid), localId: bestLid };
+      }
+    }
     if (!followInfo) {
-      await replyMessage(replyToken, '您尚未跟隨任何房間\n請先輸入房號（如：2 或 B01）');
+      await replyMessage(replyToken, '尚無牌桌資料，請稍後再試');
       return;
     }
-    const eng = tables.get(followInfo.localId);
-    const mtInfo = mtConnector.tables.get(followInfo.mtTableId);
+    let eng = tables.get(followInfo.localId);
+    let mtInfo = mtConnector.tables.get(followInfo.mtTableId);
     if (!eng) {
-      await replyMessage(replyToken, '房間資料不存在，請重新輸入房號。');
-      return;
+      // followInfo 過期，改用第一張可用桌
+      const firstEntry = [...tables.entries()][0];
+      if (!firstEntry) { await replyMessage(replyToken, '房間資料不存在，請重新輸入房號。'); return; }
+      eng = firstEntry[1];
+      mtInfo = mtConnector.tables.get(localToMtMap.get(firstEntry[0]));
     }
     const st = eng.getState();
     const lastD = st.handDetails[st.handDetails.length - 1];
