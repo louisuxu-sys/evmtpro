@@ -240,30 +240,19 @@ function buildAnalysisFlex(engine, mtInfo, mode) {
   const bigRoad  = historyToBigRoad(liveHistory, livePoints);
   const history  = liveHistory;
 
-  // 統計以 mtInfo.summary（MT平台權威數據）為優先，非零時直接使用
-  if (mtInfo && mtInfo.summary && mtInfo.summary.total > 0) {
-    stats = {
-      banker: mtInfo.summary.banker || 0,
-      player: mtInfo.summary.player || 0,
-      tie:    mtInfo.summary.tie    || 0,
-    };
-  } else if (stats.banker + stats.player + stats.tie === 0 && liveHistory.length > 0) {
-    // 若 engine 無歷史，從 liveHistory 補算統計
-    stats = { banker: 0, player: 0, tie: 0 };
-    for (const h of liveHistory) {
-      if (h === 'B') stats.banker++;
-      else if (h === 'P') stats.player++;
-      else if (h === 'T') stats.tie++;
-    }
-  }
+  // 統計以 mtInfo.summary（MT平台權威數據）為唯一來源；若無則顯示空白
+  stats = (mtInfo && mtInfo.summary && mtInfo.summary.total > 0)
+    ? { banker: mtInfo.summary.banker || 0, player: mtInfo.summary.player || 0, tie: mtInfo.summary.tie || 0 }
+    : { banker: null, player: null, tie: null };
 
   const _rawN = (mtInfo && mtInfo.tableName) || engine.tableName || '';
   const tableName = (_rawN && _rawN.includes('百家樂')) ? _rawN : `百家樂 ${_rawN || (mtInfo && mtInfo.displayNum) || engine.tableId || '?'}`;
-  const total = stats.banker + stats.player + stats.tie;
+  const hasStats = stats.banker !== null;
+  const total = hasStats ? (stats.banker + stats.player + stats.tie) : null;
 
-  const bPct = total > 0 ? (stats.banker / total * 100).toFixed(1) : '45.9';
-  const pPct = total > 0 ? (stats.player / total * 100).toFixed(1) : '45.1';
-  const tPct = total > 0 ? (stats.tie / total * 100).toFixed(1) : '9.1';
+  const bPct = (hasStats && total > 0) ? (stats.banker / total * 100).toFixed(1) : '-';
+  const pPct = (hasStats && total > 0) ? (stats.player / total * 100).toFixed(1) : '-';
+  const tPct = (hasStats && total > 0) ? (stats.tie / total * 100).toFixed(1) : '-';
 
   const evB = (ev && ev.banker != null) ? ev.banker.toFixed(4) : '-0.0149';
   const evP = (ev && ev.player != null) ? ev.player.toFixed(4) : '-0.0080';
@@ -284,7 +273,7 @@ function buildAnalysisFlex(engine, mtInfo, mode) {
   const shoeProgress = Math.round(cardsUsed / TOTAL_CARDS_8DECK * 100);
   const cardsLeft = totalCards || TOTAL_CARDS_8DECK;
 
-  const nonTieTotal = stats.banker + stats.player;
+  const nonTieTotal = hasStats ? (stats.banker + stats.player) : 0;
   const accuracy = nonTieTotal > 0
     ? Math.round(Math.max(stats.banker, stats.player) / nonTieTotal * 100)
     : 50;
@@ -294,9 +283,9 @@ function buildAnalysisFlex(engine, mtInfo, mode) {
   const lines = [
     `• 🎯 機率：莊${bPct}% / 閒${pPct}% / 和${tPct}%`,
     `• 💰 期望值：莊${evB} / 閒${evP}`,
-    `• 📈 精準度：${accuracy}%（已分析${total}局）`,
+    `• 📈 精準度：${accuracy}%（已分析${total != null ? total : '-'}局）`,
     `• 🃏 牌靴進度：${shoeProgress}%（約剩${cardsLeft}張）`,
-    `• 📊 歷史：莊${bPct}%（${stats.banker}局）/閒${pPct}%（${stats.player}局）`,
+    `• 📊 歷史：莊${bPct}%（${hasStats ? stats.banker : '-'}局）/閒${pPct}%（${hasStats ? stats.player : '-'}局）`,
     `• 🔥 ${streakText}`,
     `• 🐉 長龍：${dragonText}`,
     `• 👁 大眼行：紅${roads.bigEye.r}%/藍${roads.bigEye.b}%`,
@@ -337,7 +326,7 @@ function buildAnalysisFlex(engine, mtInfo, mode) {
             contents: [
               { type: 'text', text: `🎯  預測：${predLabel}`, size: 'xxl', weight: 'bold', color: predColor, align: 'center' },
               { type: 'text', text: `信心：${pred.confidence}% | 注碼：${pred.betSize}單位`, size: 'sm', color: '#555555', align: 'center', margin: 'xs' },
-              { type: 'text', text: `AI精準度 ${accuracy}% | 莊:${stats.banker} 閒:${stats.player} 和:${stats.tie} 總${total}`, size: 'xs', color: '#888888', align: 'center', margin: 'xs' }
+              { type: 'text', text: `AI精準度 ${accuracy}% | 莊:${hasStats ? stats.banker : '-'} 閒:${hasStats ? stats.player : '-'} 和:${hasStats ? stats.tie : '-'} 總${total != null ? total : '-'}`, size: 'xs', color: '#888888', align: 'center', margin: 'xs' }
             ]
           },
           { type: 'separator', margin: 'sm' },
@@ -388,11 +377,11 @@ function buildHandResultFlex(engine, mtInfo, detail) {
   const winLabel = _w === 'B' ? '莊贏' : _w === 'P' ? '閒贏' : _w === 'T' ? '和局' : '-';
   const winColor = _w === 'B' ? COLOR_B : _w === 'P' ? COLOR_P : _w === 'T' ? COLOR_T : '#888888';
 
-  // 統計以 mtInfo.summary（MT平台權威數據）為優先
+  // 統計以 mtInfo.summary（MT平台權威數據）為唯一來源；若無則顯示空白
   const dispStats = (mtInfo && mtInfo.summary && mtInfo.summary.total > 0)
     ? { banker: mtInfo.summary.banker || 0, player: mtInfo.summary.player || 0, tie: mtInfo.summary.tie || 0 }
-    : stats;
-  const total = dispStats.banker + dispStats.player + dispStats.tie;
+    : null;
+  const total = dispStats ? (dispStats.banker + dispStats.player + dispStats.tie) : null;
   const evB = (ev && ev.banker != null) ? ev.banker.toFixed(4) : '-';
   const evP = (ev && ev.player != null) ? ev.player.toFixed(4) : '-';
 
