@@ -13,10 +13,9 @@ function fmtDate(ts) {
 
 class UserManager {
   constructor(adminIds = []) {
-    this.admins    = new Set(adminIds.filter(Boolean));
-    this.users     = new Map(); // userId -> { firstSeen, trialExpiry, expiry }
-    this.codes     = new Map(); // code   -> { days, createdBy, createdAt, usedBy, usedAt }
-    this.following = new Map(); // targetId -> { mtTableId, localId, tableName }
+    this.admins = new Set(adminIds.filter(Boolean));
+    this.users  = new Map(); // userId -> { firstSeen, trialExpiry, expiry }
+    this.codes  = new Map(); // code   -> { days, createdBy, createdAt, usedBy, usedAt }
     this._load();
   }
 
@@ -25,10 +24,9 @@ class UserManager {
     try {
       if (fs.existsSync(DATA_FILE)) {
         const data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-        if (data.users)     for (const [k, v] of Object.entries(data.users))     this.users.set(k, v);
-        if (data.codes)     for (const [k, v] of Object.entries(data.codes))     this.codes.set(k, v);
-        if (data.following) for (const [k, v] of Object.entries(data.following)) this.following.set(k, v);
-        console.log(`👥 UserManager 載入: ${this.users.size} 用戶, ${this.codes.size} 序號, ${this.following.size} 跟隨`);
+        if (data.users) for (const [k, v] of Object.entries(data.users)) this.users.set(k, v);
+        if (data.codes) for (const [k, v] of Object.entries(data.codes)) this.codes.set(k, v);
+        console.log(`👥 UserManager 載入: ${this.users.size} 用戶, ${this.codes.size} 序號`);
       }
     } catch (e) { console.error('UserManager 載入失敗:', e.message); }
   }
@@ -36,28 +34,10 @@ class UserManager {
   _save() {
     try {
       fs.writeFileSync(DATA_FILE, JSON.stringify({
-        users:     Object.fromEntries(this.users),
-        codes:     Object.fromEntries(this.codes),
-        following: Object.fromEntries(this.following)
+        users: Object.fromEntries(this.users),
+        codes: Object.fromEntries(this.codes)
       }, null, 2));
     } catch (e) { console.error('UserManager 儲存失敗:', e.message); }
-  }
-
-  // ── 跟隨房間持久化 ──────────────────────────────────────
-  setFollowing(targetId, info) {
-    this.following.set(targetId, info);
-    this._save();
-  }
-
-  getFollowing(targetId) {
-    return this.following.get(targetId) || null;
-  }
-
-  deleteFollowing(targetId) {
-    if (this.following.has(targetId)) {
-      this.following.delete(targetId);
-      this._save();
-    }
   }
 
   // ── 用戶初始化 ───────────────────────────────────────────

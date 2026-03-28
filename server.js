@@ -6,7 +6,7 @@ const path = require('path');
 const line = require('@line/bot-sdk');
 const BaccaratEngine = require('./baccarat-engine');
 const MTConnector = require('./mt-connector');
-const { buildAnalysisFlex, buildHandResultFlex, buildRoomCarousel, buildTrackingFlex, QUICK_REPLY } = require('./flex-builder');
+const { buildAnalysisFlex, buildHandResultFlex, buildRoomCarousel, QUICK_REPLY } = require('./flex-builder');
 const UserManager = require('./user-manager');
 
 const app = express();
@@ -41,7 +41,7 @@ const tables = new Map();           // localId -> BaccaratEngine
 const subscribers = new Set();      // LINE 訂閱者 (EV 警報)
 let mtTableIdMap = new Map();       // MT平台 tableId -> localId
 let localToMtMap = new Map();       // localId -> MT平台 tableId
-// userFollowing now persisted via userManager.setFollowing/getFollowing/deleteFollowing
+const userFollowing = new Map();    // LINE userId -> { mtTableId, localId }
 
 // ===== MT 連線器 =====
 const mtConnector = new MTConnector({
@@ -129,19 +129,17 @@ mtConnector.on('game_result', (data) => {
 // 每用戶推送冷卻（避免 LINE 429）
 const pushCooldown = new Map(); // userId -> lastPushTimestamp
 const PUSH_COOLDOWN_MS = 10000;
-const lastPushedRoom = new Map(); // targetId -> { mtTableId, localId }
 
 // 推送開牌結果給跟隨用戶（每手推送牌型結果）
 function pushToFollowers(mtTableId, localId, engine, ev, detail) {
   const mtInfo = mtConnector.tables.get(mtTableId);
   const now = Date.now();
-  for (const [userId, info] of userManager.following) {
+  for (const [userId, info] of userFollowing) {
     if (info.mtTableId === mtTableId) {
       // 限速：每用戶每 3 秒最多 1 次推送
       const last = pushCooldown.get(userId) || 0;
       if (now - last < PUSH_COOLDOWN_MS) continue;
       pushCooldown.set(userId, now);
-      lastPushedRoom.set(userId, { mtTableId, localId }); // 記录最近推送房間
       try {
         const flex = buildHandResultFlex(engine, mtInfo, detail);
         pushFlex(userId, flex);
@@ -203,7 +201,7 @@ app.get('/api/debug/line-status', (req, res) => {
     lineClientReady: !!lineClient,
     tokenHead: token ? token.substring(0, 8) + '...' : '(未設定)',
     channelSecretSet: !!(process.env.LINE_CHANNEL_SECRET),
-    userFollowingCount: userManager.following.size,
+    userFollowingCount: userFollowing.size,
     tablesCount: tables.size
   });
 });
@@ -388,10 +386,10 @@ async function handleLineEvent(event) {
     for (const [lid, eng] of tables) {
       const mid = localToMtMap.get(lid);
       const mi = mid ? mtConnector.tables.get(mid) : null;
-      // 比對 displayNum、tableName、本地 lid 三種格式
+      // 比對 displayNum、tableName（去掉"百家樂 "前綴）兩種格式
       const dnKey = mi ? String(mi.displayNum || '').toUpperCase() : '';
       const tnKey = String(eng.tableName || '').replace(/^百家樂\s*/,'').toUpperCase();
-      if (dnKey === inputKey || tnKey === inputKey || String(lid) === inputKey) {
+      if (dnKey === inputKey || tnKey === inputKey) {
         targetLocalId = lid;
         break;
       }
@@ -410,22 +408,20 @@ async function handleLineEvent(event) {
       const engine = tables.get(targetLocalId);
       const mtId = localToMtMap.get(targetLocalId);
       console.log(`🎯 followMatch lid=${targetLocalId} tn=${engine?.tableName} mtId=${mtId}`);
-      userManager.setFollowing(targetId, { mtTableId: mtId, localId: targetLocalId });
+      userFollowing.set(targetId, { mtTableId: mtId, localId: targetLocalId });
       const mtInfo = mtId ? mtConnector.tables.get(mtId) : null;
-      const st = engine.getState();
-      const details = st.handDetails || [];
-      // 優先用有牌面資料的最新一手，沒有則用最後一手
-      const lastD = details.slice().reverse().find(d => d.playerCards && d.playerCards.length >= 2)
-                    || details[details.length - 1];
-      if (!lastD) {
-        await replyMessage(replyToken, `✅ 已跟隨「${engine.tableName}」\n等待開局資料，有新結果時自動通知`);
-      } else {
+      try {
+        console.log(`🔨 buildAnalysisFlex start lid=${targetLocalId}`);
+        const flex = buildAnalysisFlex(engine, mtInfo);
+        console.log(`✅ buildAnalysisFlex done, calling replyFlex`);
+        await replyFlex(replyToken, flex, targetId);
+      } catch (e) {
+        console.error('Flex build error:', e.message, e.stack);
+        const state = engine.getState();
         try {
-          const flex = buildHandResultFlex(engine, mtInfo, lastD);
-          await replyFlex(replyToken, flex, targetId);
-        } catch (e) {
-          console.error('Follow flex error:', e.message);
-          await replyMessage(replyToken, `✅ 已跟隨「${engine.tableName}」`);
+          await lineClient.replyMessage({ replyToken, messages: [{ type: 'text', text: `✅ 已開始跟隨「${engine.tableName}」\n荷官: ${state.dealer || '-'}`, quickReply: QUICK_REPLY }] });
+        } catch (_) {
+          if (targetId && lineClient) await lineClient.pushMessage({ to: targetId, messages: [{ type: 'text', text: `✅ 已跟隨「${engine.tableName}」`, quickReply: QUICK_REPLY }] }).catch(()=>{});
         }
       }
     } else {
@@ -444,7 +440,7 @@ async function handleLineEvent(event) {
       const mid = localToMtMap.get(lid);
       const mi = mid ? mtConnector.tables.get(mid) : null;
       const dnKey = mi ? String(mi.displayNum || '').toUpperCase() : '';
-      const tnKey = String(eng.tableName || '').replace(/^百家樂\s*/,'').toUpperCase();
+      const tnKey = String(eng.tableName || '').replace(/^百家樂\s*/, '').toUpperCase();
       if (dnKey === inputKey || tnKey === inputKey) { targetLocalId = lid; break; }
     }
     if (targetLocalId !== null) {
@@ -465,31 +461,16 @@ async function handleLineEvent(event) {
 
   // ===== 繼續分析（免費 pull 模式：回展最新一手牌型）=====
   if (text === '繼續分析' || text === '最新牌型' || text === '追蹤') {
-    let followInfo = userManager.getFollowing(targetId)
-                   || lastPushedRoom.get(targetId)
-                   || lastPushedRoom.get(userId);
-    // 沒有跟隨記錄時，自動使用局數最多的桌台（最活躍）
-    if (!followInfo && tables.size > 0) {
-      let bestLid = null, bestCount = -1;
-      for (const [lid, eng] of tables) {
-        if (eng.handCount > bestCount) { bestCount = eng.handCount; bestLid = lid; }
-      }
-      if (bestLid !== null) {
-        followInfo = { mtTableId: localToMtMap.get(bestLid), localId: bestLid };
-      }
-    }
+    const followInfo = userFollowing.get(targetId);
     if (!followInfo) {
-      await replyMessage(replyToken, '尚無牌桌資料，請稍後再試');
+      await replyMessage(replyToken, '您尚未跟隨任何房間\n請先輸入房號（如：2 或 B01）');
       return;
     }
-    let eng = tables.get(followInfo.localId);
-    let mtInfo = mtConnector.tables.get(followInfo.mtTableId);
+    const eng = tables.get(followInfo.localId);
+    const mtInfo = mtConnector.tables.get(followInfo.mtTableId);
     if (!eng) {
-      // followInfo 過期，改用第一張可用桌
-      const firstEntry = [...tables.entries()][0];
-      if (!firstEntry) { await replyMessage(replyToken, '房間資料不存在，請重新輸入房號。'); return; }
-      eng = firstEntry[1];
-      mtInfo = mtConnector.tables.get(localToMtMap.get(firstEntry[0]));
+      await replyMessage(replyToken, '房間資料不存在，請重新輸入房號。');
+      return;
     }
     const st = eng.getState();
     const lastD = st.handDetails[st.handDetails.length - 1];
@@ -509,10 +490,9 @@ async function handleLineEvent(event) {
 
   // ===== 取消跟隨 =====
   if (text === '取消' || text === '取消跟隨' || text === '離開') {
-    const _cancelInfo = userManager.getFollowing(targetId);
-    if (_cancelInfo) {
-      const info = _cancelInfo;
-      userManager.deleteFollowing(targetId);
+    if (userFollowing.has(targetId)) {
+      const info = userFollowing.get(targetId);
+      userFollowing.delete(targetId);
       await replyMessage(replyToken, `❌ 已停止跟隨第${info.localId}廳`);
     } else {
       await replyMessage(replyToken, '目前沒有跟隨任何房間');
