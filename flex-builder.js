@@ -481,7 +481,7 @@ const QUICK_REPLY = {
     { type: 'action', action: { type: 'message', label: '🃏 繼續分析', text: '繼續分析' } },
     { type: 'action', action: { type: 'message', label: '❌ 取消跟隨', text: '取消' } },
     { type: 'action', action: { type: 'message', label: '🏠 全廳', text: '全廳' } },
-    { type: 'action', action: { type: 'message', label: '� 儲值', text: '儲值' } }
+    { type: 'action', action: { type: 'message', label: '儲值', text: '儲值' } }
   ]
 };
 

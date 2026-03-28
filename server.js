@@ -331,14 +331,17 @@ async function handleLineEvent(event) {
       `─────────────\n` +
       `請聯絡管理員取得序號\n\n` +
       `兌換方式：\n` +
-      `輸入「兌換 序號」\n` +
-      `例：兌換 ABCD-EFGH-IJKL-MNOP`);
+      `直接輸入序號即可\n` +
+      `格式：XXXX-XXXX-XXXX-XXXX`);
     return;
   }
 
-  const redeemMatch = text.match(/^兌換\s+([A-Z0-9\-]+)$/i);
-  if (redeemMatch) {
-    const result = userManager.redeemCode(userId, redeemMatch[1]);
+  // 直接輸入序號（無需「兌換」前置詞）
+  const rawCodeMatch = text.match(/^([A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4})$/i);
+  const redeemMatch  = !rawCodeMatch && text.match(/^兌換\s+([A-Z0-9\-]+)$/i);
+  const codeToRedeem = rawCodeMatch ? rawCodeMatch[1] : (redeemMatch ? redeemMatch[1] : null);
+  if (codeToRedeem) {
+    const result = userManager.redeemCode(userId, codeToRedeem);
     if (result.ok) {
       const expDate = new Date(result.expiry).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false });
       await replyMessage(replyToken, `✅ 兌換成功！\n📅 延長 ${result.days} 天\n⏰ 到期：${expDate}\n\n輸入「指令」開始使用`);
