@@ -5,3 +5,4 @@ node_modules/
 .mt-localstorage.json
 mt-debug*.json
 test-screenshot.jpg
+users.json

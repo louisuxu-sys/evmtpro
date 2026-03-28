@@ -7,6 +7,7 @@ const line = require('@line/bot-sdk');
 const BaccaratEngine = require('./baccarat-engine');
 const MTConnector = require('./mt-connector');
 const { buildAnalysisFlex, buildHandResultFlex, buildRoomCarousel, QUICK_REPLY } = require('./flex-builder');
+const UserManager = require('./user-manager');
 
 const app = express();
 const server = http.createServer(app);
@@ -30,6 +31,10 @@ if (lineConfig.channelAccessToken && lineConfig.channelAccessToken !== 'your_lin
 
 const EV_ALERT_THRESHOLD = parseFloat(process.env.EV_ALERT_THRESHOLD || '0.01');
 const LINE_NOTIFY_TARGETS = (process.env.LINE_NOTIFY_TARGETS || '').split(',').filter(Boolean);
+
+// ===== 管理員 / 用戶系統 =====
+const ADMIN_LINE_IDS = (process.env.ADMIN_LINE_IDS || '').split(',').filter(Boolean);
+const userManager = new UserManager(ADMIN_LINE_IDS);
 
 // ===== 全廳桌台管理 =====
 const tables = new Map();           // localId -> BaccaratEngine
@@ -268,6 +273,91 @@ async function handleLineEvent(event) {
   console.log(`💬 LINE msg: "${text}" from ${targetId?.substring(0, 8)}`);
 
   try {
+  // ===== 管理員指令 (永遠可用) =====
+  if (userManager.isAdmin(userId)) {
+    const genMatch = text.match(/^生成序號\s*(\d+)$/);
+    if (genMatch) {
+      const result = userManager.generateCode(parseInt(genMatch[1]), userId);
+      if (result.ok) {
+        await replyMessage(replyToken,
+          `✅ 序號已生成\n` +
+          `🔑 ${result.code}\n` +
+          `📅 有效期：${result.days} 天`);
+      } else {
+        await replyMessage(replyToken, `❌ 生成失敗：${result.error}`);
+      }
+      return;
+    }
+    const queryMatch = text.match(/^查詢\s*(U[0-9a-f]+)$/i);
+    if (queryMatch) {
+      await replyMessage(replyToken, userManager.queryUser(queryMatch[1]));
+      return;
+    }
+    if (text === '序號列表') {
+      const list = userManager.listRecentCodes(10);
+      await replyMessage(replyToken, list ? `📋 最近序號:\n─────\n${list}` : '尚無序號');
+      return;
+    }
+    if (text === '用戶列表') {
+      const entries = [...userManager.users.entries()].slice(-10);
+      if (!entries.length) { await replyMessage(replyToken, '尚無用戶記錄'); return; }
+      const lines = entries.map(([uid, u]) => {
+        const status = userManager.getUserStatusText(uid);
+        return `${uid.substring(0,12)}... ${status.split('\n')[0]}`;
+      }).join('\n');
+      await replyMessage(replyToken, `👥 用戶列表 (最近${entries.length}筆):\n${lines}`);
+      return;
+    }
+  }
+
+  // ===== 用戶管理指令 (不需使用權) =====
+  if (text === '我的狀態' || text === '狀態') {
+    userManager._getOrCreate(userId);
+    const status = userManager.getUserStatusText(userId);
+    await replyMessage(replyToken, `📊 我的狀態\nUID: ${userId.substring(0,20)}...\n${status}\n\n輸入「儲值」了解方案`);
+    return;
+  }
+
+  if (text === '儲值' || text === '充值') {
+    await replyMessage(replyToken,
+      `💰 儲值方案\n` +
+      `─────────────\n` +
+      `📅  1天  |  2天  |  3天\n` +
+      `📅  7天  |  15天  |  30天\n` +
+      `📅  365天\n` +
+      `─────────────\n` +
+      `請聯絡管理員取得序號\n\n` +
+      `兌換方式：\n` +
+      `輸入「兌換 序號」\n` +
+      `例：兌換 ABCD-EFGH-IJKL-MNOP`);
+    return;
+  }
+
+  const redeemMatch = text.match(/^兌換\s+([A-Z0-9\-]+)$/i);
+  if (redeemMatch) {
+    const result = userManager.redeemCode(userId, redeemMatch[1]);
+    if (result.ok) {
+      const expDate = new Date(result.expiry).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false });
+      await replyMessage(replyToken, `✅ 兌換成功！\n📅 延長 ${result.days} 天\n⏰ 到期：${expDate}\n\n輸入「指令」開始使用`);
+    } else {
+      await replyMessage(replyToken, `❌ 兌換失敗：${result.error}`);
+    }
+    return;
+  }
+
+  // ===== 使用權限檢查 =====
+  userManager._getOrCreate(userId); // 啟動試用計時器
+  const access = userManager.checkAccess(userId);
+  if (!access.ok) {
+    const expDate = userManager.users.get(userId);
+    await replyMessage(replyToken,
+      `🔒 使用時間已到期\n\n` +
+      `輸入「儲值」了解續費方案\n` +
+      `輸入「我的狀態」查看詳情\n` +
+      `輸入「兌換 序號」使用序號`);
+    return;
+  }
+
   // ===== 全廳掃描 =====
   if (text === '全廳' || text === '房間' || text === '廳') {
     const roomList = getRoomListData();
@@ -406,15 +496,31 @@ async function handleLineEvent(event) {
 
   // ===== 指令幫助 =====
   if (text === '指令' || text === '幫助' || text === 'help') {
-    await replyMessage(replyToken,
-      `🎰 百家之眼 - 指令列表\n` +
-      `📊 全廳 - 查看所有百家樂房間\n` +
-      `🔢 輸入房號 - 跟隨房間，如: 2 或 B01\n` +
-      `🃏 繼續分析 - 查看最新一手牌型（免費）\n` +
-      `🔍 分析X - 查看 AI 分析，如: 分析2 或 分析B01\n` +
+    const isAdmin = userManager.isAdmin(userId);
+    const acc = userManager.checkAccess(userId);
+    const accLabel = acc.reason === 'admin' ? '👑 管理員' : acc.reason === 'active' ? '✅ 訂閱中' : acc.reason === 'trial' ? '⏱ 試用中' : '❌ 已到期';
+    let msg =
+      `🎰 百家之眼 指令列表\n` +
+      `狀態: ${accLabel}\n` +
+      `─────────────\n` +
+      `📊 全廳 - 所有百家樂房間\n` +
+      `🔢 輸入房號 - 跟隨房間 (如: 2)\n` +
+      `🃏 繼續分析 - 最新一手\n` +
+      `🔍 分析X - AI分析 (如: 分析2)\n` +
       `❌ 取消 - 停止跟隨\n` +
-      `❓ 指令 - 顯示此幫助`
-    );
+      `─────────────\n` +
+      `📊 我的狀態 - 查看剩餘時間\n` +
+      `💰 儲值 - 查看方案\n` +
+      `🔑 兌換 序號 - 輸入序號`;
+    if (isAdmin) {
+      msg += `\n─────────────\n` +
+        `👑 管理員指令\n` +
+        `生成序號 [天數] - 如: 生成序號7\n` +
+        `查詢 [UID] - 查詢用戶\n` +
+        `序號列表 - 查看序號\n` +
+        `用戶列表 - 查看用戶`;
+    }
+    await replyMessage(replyToken, msg);
     return;
   }
 
