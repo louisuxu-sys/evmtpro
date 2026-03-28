@@ -314,7 +314,7 @@ async function handleLineEvent(event) {
   if (text === '我的狀態' || text === '狀態') {
     userManager._getOrCreate(userId);
     const status = userManager.getUserStatusText(userId);
-    await replyMessage(replyToken, `📊 我的狀態\nUID: ${userId.substring(0,20)}...\n${status}\n\n輸入「儲值」了解方案`);
+    await replyMessage(replyToken, `📊 我的狀態\nUID: ${userId}\n${status}\n\n輸入「儲值」了解方案`);
     return;
   }
 
