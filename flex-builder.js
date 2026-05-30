@@ -278,21 +278,6 @@ function buildAnalysisFlex(engine, mtInfo, mode) {
     ? Math.round(Math.max(stats.banker, stats.player) / nonTieTotal * 100)
     : 50;
 
-  const roads = getDerivedRoadStats(bigRoad);
-
-  const lines = [
-    `• 🎯 機率：莊${bPct}% / 閒${pPct}% / 和${tPct}%`,
-    `• 💰 期望值：莊${evB} / 閒${evP}`,
-    `• 📈 精準度：${accuracy}%（已分析${total != null ? total : '-'}局）`,
-    `• 🃏 牌靴進度：${shoeProgress}%（約剩${cardsLeft}張）`,
-    `• 📊 歷史：莊${bPct}%（${hasStats ? stats.banker : '-'}局）/閒${pPct}%（${hasStats ? stats.player : '-'}局）`,
-    `• 🔥 ${streakText}`,
-    `• 🐉 長龍：${dragonText}`,
-    `• 👁 大眼行：紅${roads.bigEye.r}%/藍${roads.bigEye.b}%`,
-    `• 🔍 小路：紅${roads.small.r}%/藍${roads.small.b}%`,
-    `• 🪳 蟑螂路：紅${roads.cockroach.r}%（${roads.cockroach.r >= 65 ? '近期全紅＝機運強' : '近期混合'}）`
-  ];
-
   return {
     type: 'flex',
     altText: `${tableName} | 預測${predLabel} 信心${pred.confidence}%`,
@@ -329,10 +314,7 @@ function buildAnalysisFlex(engine, mtInfo, mode) {
               { type: 'text', text: `AI精準度 ${accuracy}% | 莊:${hasStats ? stats.banker : '-'} 閒:${hasStats ? stats.player : '-'} 和:${hasStats ? stats.tie : '-'} 總${total != null ? total : '-'}`, size: 'xs', color: '#888888', align: 'center', margin: 'xs' }
             ]
           },
-          { type: 'separator', margin: 'sm' },
-          // AI 分析報告
-          { type: 'text', text: '📊 AI分析報告：', size: 'sm', weight: 'bold', color: '#333333', margin: 'sm' },
-          { type: 'text', text: lines.join('\n'), size: 'xs', color: '#555555', wrap: true, margin: 'xs' }
+          { type: 'separator', margin: 'sm' }
         ]
       },
       footer: {

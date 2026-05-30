@@ -1250,9 +1250,9 @@ class MTConnector extends EventEmitter {
     const m = tableId.match(/^gc\d{3}(\d{3})$/i);
     if (m) {
       const n = parseInt(m[1]);
-      if (n >= 1 && n <= 20) return String(n);
-      const bMap = { 31: 'B01', 32: 'B02', 33: 'B03', 34: 'B03A', 35: 'B05' };
+      const bMap = { 4: '3A', 31: 'B01', 32: 'B02', 33: 'B03', 34: 'B03A', 35: 'B05' };
       if (bMap[n]) return bMap[n];
+      if (n >= 1 && n <= 20) return String(n);
     }
     return null;
   }
