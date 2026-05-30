@@ -1731,13 +1731,21 @@ class MTConnector extends EventEmitter {
         summary = { total: totalRound, banker: bc, player: pc, tie: tc };
       }
 
+      // 提取/重命名 displayNum（SignalR 路徑）
+      const _rnRoom = this._extractRoomNum(tableId);
+      const _tnMatch = !_rnRoom && tableName.match(/百家樂\s*(\S+)/);
+      const _rawDisplay = _rnRoom || (_tnMatch ? _tnMatch[1] : null);
+      const resolvedDisplayNum = _rawDisplay || tableName.replace(/^百家樂\s*/, '') || tableId;
+      const resolvedTableName = `百家樂 ${resolvedDisplayNum}`;
+
       const existingInfo = this.tables.get(tableId);
       const newShoe = t.shoe || t.Shoe || t.shoeNo || (trend && trend.current_shoe) || null;
       const shoeSwitched = newShoe && existingInfo && existingInfo.shoe && String(existingInfo.shoe) !== String(newShoe);
       if (shoeSwitched) console.log(`🔄 ${tableId} 換靴 ${existingInfo.shoe}→${newShoe}，${listHistory.length > 0 ? '清除舊路' : '保留舊路待新靴資料'}`);
       const info = {
         tableId,
-        tableName,
+        tableName: resolvedTableName,
+        displayNum: resolvedDisplayNum,
         dealer,
         shoe: newShoe,
         round: t.round || t.Round || t.roundNo || (trend && trend.current_round) || null,
