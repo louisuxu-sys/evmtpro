@@ -495,7 +495,7 @@ function getDealerPhotoUrl(dealerName, avatarUrl) {
 function buildRoomBubble(lid, engine, mtInfo) {
   const displayNum = (mtInfo && mtInfo.displayNum) != null
     ? String(mtInfo.displayNum)
-    : String(lid);
+    : ((engine.tableName || '').replace(/^百家樂\s*/, '') || String(lid));
   const dealerName = (mtInfo && mtInfo.dealer && mtInfo.dealer.name) || engine.dealer || '-';
   const avatarUrl  = (mtInfo && mtInfo.dealer && mtInfo.dealer.avatar) || '';
   const summary    = mtInfo && mtInfo.summary;
