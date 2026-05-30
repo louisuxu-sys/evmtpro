@@ -1,13 +1,18 @@
 services:
   - type: web
     name: evpro-monitor
+    plan: free
     runtime: docker
     dockerfilePath: ./Dockerfile
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
-        value: 3000
+        value: 10000
+      - key: PUPPETEER_SKIP_DOWNLOAD
+        value: true
+      - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
+        value: true
       - key: LINE_CHANNEL_SECRET
         sync: false
       - key: LINE_CHANNEL_ACCESS_TOKEN
