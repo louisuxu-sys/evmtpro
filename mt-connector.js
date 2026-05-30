@@ -1732,10 +1732,11 @@ class MTConnector extends EventEmitter {
       }
 
       // 提取/重命名 displayNum（SignalR 路徑）
+      const _RENAME_MAP = { '4': '3A' };
       const _rnRoom = this._extractRoomNum(tableId);
       const _tnMatch = !_rnRoom && tableName.match(/百家樂\s*(\S+)/);
-      const _rawDisplay = _rnRoom || (_tnMatch ? _tnMatch[1] : null);
-      const resolvedDisplayNum = _rawDisplay || tableName.replace(/^百家樂\s*/, '') || tableId;
+      const _rawDisplay = _rnRoom || (_tnMatch ? _tnMatch[1] : null) || tableName.replace(/^百家樂\s*/, '') || tableId;
+      const resolvedDisplayNum = _RENAME_MAP[_rawDisplay] || _rawDisplay;
       const resolvedTableName = `百家樂 ${resolvedDisplayNum}`;
 
       const existingInfo = this.tables.get(tableId);
