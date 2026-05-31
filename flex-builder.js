@@ -143,16 +143,28 @@ function predictNext(history, stats, ev) {
     }
   }
 
-  // ── EV 加權修正 ──
-  // EV 越傾向預測方向 → 提升信心；反向則降低
-  if (ev && typeof ev.banker === 'number' && ev.shoeConfidence) {
-    const evDiff = ev.banker - ev.player; // 正=莊優勢
-    const weight = ev.shoeConfidence;     // 牌靴可信度 0~1
-    const evBoost = Math.round(Math.abs(evDiff) * 8000 * weight);
-    if ((predicted === 'B' && evDiff > 0.002) || (predicted === 'P' && evDiff < -0.002)) {
+  // ── EV 最終決定 ──
+  // EV 是最終裁判：若走勢與 EV 方向不符，以 EV 為準並調整信心值
+  if (ev && typeof ev.banker === 'number' && typeof ev.player === 'number') {
+    const evFavorsB = ev.banker > ev.player;
+    const evDiff = Math.abs(ev.banker - ev.player);
+    const weight = ev.shoeConfidence || 0.3;
+    const evBoost = Math.round(evDiff * 8000 * weight);
+
+    if (evFavorsB && predicted === 'B') {
+      // 走勢與 EV 同向 → 提升信心
       confidence = Math.min(92, confidence + evBoost);
-    } else if ((predicted === 'B' && evDiff < -0.002) || (predicted === 'P' && evDiff > 0.002)) {
-      confidence = Math.max(45, confidence - Math.round(evBoost * 0.6));
+    } else if (!evFavorsB && predicted === 'P') {
+      // 走勢與 EV 同向 → 提升信心
+      confidence = Math.min(92, confidence + evBoost);
+    } else if (evFavorsB && predicted === 'P') {
+      // 走勢說閒但 EV 說莊 → 改為推薦莊，信心稍降
+      predicted = 'B';
+      confidence = Math.max(51, confidence - 8);
+    } else if (!evFavorsB && predicted === 'B') {
+      // 走勢說莊但 EV 說閒 → 改為推薦閒，信心稍降
+      predicted = 'P';
+      confidence = Math.max(51, confidence - 8);
     }
   }
 
@@ -424,7 +436,7 @@ function buildHandResultFlex(engine, mtInfo, detail) {
           // 統計
           {
             type: 'text',
-            text: `莊${dispStats.banker} 閒${dispStats.player} 和${dispStats.tie} 共${total}局  |  EV ${predLabel}${pred.result === 'B' ? evB : evP}`,
+            text: `莊${dispStats.banker} 閒${dispStats.player} 和${dispStats.tie} 共${total}局  |  EV 莊${evB}/閒${evP}`,
             size: 'xs', color: '#888888', wrap: true
           }
         ].filter(Boolean)
