@@ -108,8 +108,8 @@ function buildBigRoadFlex(bigRoad) {
   return [{ type: 'box', layout: 'horizontal', contents: colBoxes, spacing: 'xs', paddingAll: 'xs', backgroundColor: '#F8F9FA', cornerRadius: 'md' }];
 }
 
-// ===== 預測演算法 =====
-function predictNext(history, stats) {
+// ===== 預測演算法（EV 加權版）=====
+function predictNext(history, stats, ev) {
   const nonTie = history.filter(h => h !== 'T');
   if (nonTie.length < 3) {
     return { result: 'P', confidence: 52, betSize: 1 };
@@ -131,7 +131,6 @@ function predictNext(history, stats) {
   } else if (streakLen >= 2) {
     predicted = last; confidence = 63; betSize = 2;
   } else {
-    // 檢查交替模式
     const tail = nonTie.slice(-4);
     const isAlt = tail.length >= 4 && tail.every((v, i, a) => i === 0 || v !== a[i - 1]);
     if (isAlt) {
@@ -141,6 +140,19 @@ function predictNext(history, stats) {
       const bRate = total > 0 ? stats.banker / total : 0.5;
       predicted = bRate > 0.52 ? 'P' : 'B';
       confidence = 55; betSize = 1;
+    }
+  }
+
+  // ── EV 加權修正 ──
+  // EV 越傾向預測方向 → 提升信心；反向則降低
+  if (ev && typeof ev.banker === 'number' && ev.shoeConfidence) {
+    const evDiff = ev.banker - ev.player; // 正=莊優勢
+    const weight = ev.shoeConfidence;     // 牌靴可信度 0~1
+    const evBoost = Math.round(Math.abs(evDiff) * 8000 * weight);
+    if ((predicted === 'B' && evDiff > 0.002) || (predicted === 'P' && evDiff < -0.002)) {
+      confidence = Math.min(92, confidence + evBoost);
+    } else if ((predicted === 'B' && evDiff < -0.002) || (predicted === 'P' && evDiff > 0.002)) {
+      confidence = Math.max(45, confidence - Math.round(evBoost * 0.6));
     }
   }
 
@@ -257,7 +269,7 @@ function buildAnalysisFlex(engine, mtInfo, mode) {
   const evB = (ev && ev.banker != null) ? ev.banker.toFixed(4) : '-0.0149';
   const evP = (ev && ev.player != null) ? ev.player.toFixed(4) : '-0.0080';
 
-  const pred = predictNext(history, stats);
+  const pred = predictNext(history, stats, ev);
   const predLabel = pred.result === 'B' ? '莊' : pred.result === 'P' ? '閒' : '和';
   const predColor = pred.result === 'B' ? COLOR_B : pred.result === 'P' ? COLOR_P : COLOR_T;
   const predBg = pred.result === 'B' ? '#fff5f5' : pred.result === 'P' ? '#f0f8ff' : '#f0fff0';
@@ -338,7 +350,7 @@ function buildHandResultFlex(engine, mtInfo, detail) {
     : `\u767e\u5bb6\u6a02 ${_rawName || (mtInfo && mtInfo.displayNum) || engine.tableId || '?'}`;
   const dealerName = (mtInfo && mtInfo.dealer && mtInfo.dealer.name && mtInfo.dealer.name !== '-') ? mtInfo.dealer.name : '\u8377\u5b98';
 
-  const pred = predictNext(history, stats);
+  const pred = predictNext(history, stats, ev);
   const predLabel = pred.result === 'B' ? '莊' : pred.result === 'P' ? '閒' : '和';
   const predColor = pred.result === 'B' ? COLOR_B : pred.result === 'P' ? COLOR_P : COLOR_T;
 

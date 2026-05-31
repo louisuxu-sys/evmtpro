@@ -438,18 +438,21 @@ async function handleLineEvent(event) {
       userFollowing.set(targetId, { mtTableId: mtId, localId: targetLocalId });
       const mtInfo = mtId ? mtConnector.tables.get(mtId) : null;
       try {
-        console.log(`🔨 buildAnalysisFlex start lid=${targetLocalId}`);
-        const flex = buildAnalysisFlex(engine, mtInfo);
-        console.log(`✅ buildAnalysisFlex done, calling replyFlex`);
-        await replyFlex(replyToken, flex, targetId);
-      } catch (e) {
-        console.error('Flex build error:', e.message, e.stack);
         const state = engine.getState();
-        try {
-          await lineClient.replyMessage({ replyToken, messages: [{ type: 'text', text: `✅ 已開始跟隨「${engine.tableName}」\n荷官: ${state.dealer || '-'}`, quickReply: QUICK_REPLY }] });
-        } catch (_) {
-          if (targetId && lineClient) await lineClient.pushMessage({ to: targetId, messages: [{ type: 'text', text: `✅ 已跟隨「${engine.tableName}」`, quickReply: QUICK_REPLY }] }).catch(()=>{});
+        const lastDetail = state.handDetails[state.handDetails.length - 1];
+        if (lastDetail) {
+          // 有牌面資料 → 直接顯示最新一手結果卡片
+          const flex = buildHandResultFlex(engine, mtInfo, lastDetail);
+          await replyFlex(replyToken, flex, targetId);
+        } else {
+          // 尚無開牌紀錄 → 簡單提示
+          await replyMessage(replyToken,
+            `✅ 已跟隨「${engine.tableName}」\n荷官: ${state.dealer || '-'}\n⏳ 等待下一手開牌...\n\n點「繼續分析」或輸入「分析${engine.tableName.replace('百家樂 ', '')}」查看完整分析`);
         }
+      } catch (e) {
+        console.error('Follow flex error:', e.message);
+        const state = engine.getState();
+        await replyMessage(replyToken, `✅ 已跟隨「${engine.tableName}」\n荷官: ${state.dealer || '-'}`).catch(() => {});
       }
     } else {
       await replyMessage(replyToken, `❌ 找不到「${inputKey}」房

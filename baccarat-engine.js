@@ -19,12 +19,15 @@ class BaccaratEngine {
   constructor(tableId, tableName) {
     this.tableId = tableId;
     this.tableName = tableName || `桌 ${tableId}`;
-    this.dealer = '';       // 荷官名字
+    this.dealer = '';
     this.shoe = { ...INITIAL_SHOE };
     this.totalCards = TOTAL_CARDS_8DECK;
-    this.history = [];      // 歷史紀錄 ['B','P','T','B',...]
-    this.handDetails = [];  // 每手詳細開牌紀錄
-    this.roadMap = [];      // 路紙資料
+    // rank 層級追蹤（1-13，各 32 張 = 4花色×8副）
+    this.shoeByRank = {};
+    for (let r = 1; r <= 13; r++) this.shoeByRank[r] = 32;
+    this.history = [];
+    this.handDetails = [];
+    this.roadMap = [];
     this.handCount = 0;
     this.stats = { banker: 0, player: 0, tie: 0, bankerPair: 0, playerPair: 0 };
   }
@@ -38,6 +41,7 @@ class BaccaratEngine {
   resetShoe() {
     this.shoe = { ...INITIAL_SHOE };
     this.totalCards = TOTAL_CARDS_8DECK;
+    for (let r = 1; r <= 13; r++) this.shoeByRank[r] = 32;
     this.history = [];
     this.handDetails = [];
     this.roadMap = [];
@@ -77,6 +81,10 @@ class BaccaratEngine {
         if (this.shoe[val] !== undefined && this.shoe[val] > 0) {
           this.shoe[val]--;
           this.totalCards--;
+        }
+        // rank 層級追蹤
+        if (card.rank >= 1 && card.rank <= 13 && this.shoeByRank[card.rank] > 0) {
+          this.shoeByRank[card.rank]--;
         }
       }
       detail.playerTotal = this._calcTotal(playerCards);
@@ -226,18 +234,36 @@ class BaccaratEngine {
 
     const penetration = parseFloat(((1 - remaining / 416) * 100).toFixed(1));
 
+    // ── Super6 EV ──
+    // Super6: 莊以 3 張牌 6 點贏閒 → 賠 12:1；其他莊贏 → 賠 0.5:1
+    // 簡化估算：6點牌比例影響機率
+    const p6 = remaining > 0 ? (this.shoe[6] || 0) / remaining : 32 / 416;
+    // 莊以6贏的基礎機率 ≈ 5.39%（8副牌標準），6點越多機率越高
+    const base6WinProb = 0.0539;
+    const super6WinProb = base6WinProb * (p6 / (32 / 416));
+    const super6EV = parseFloat((super6WinProb * 12 - (1 - super6WinProb)).toFixed(6));
+
+    // ── 牌靴信心指數（0~1，越高代表計數越可信）──
+    // 滲透率越高、有牌面資料比例越高 → 信心越強
+    const cardDataRatio = this.handDetails.length > 0
+      ? this.handDetails.filter(d => d.playerCards && d.playerCards.length >= 2).length / this.handDetails.length
+      : 0;
+    const shoeConfidence = parseFloat((Math.min(1, (penetration / 100) * 0.6 + cardDataRatio * 0.4)).toFixed(3));
+
     return {
-      banker:       parseFloat(bankerEV.toFixed(6)),
-      player:       parseFloat(playerEV.toFixed(6)),
-      tie:          parseFloat(tieEV.toFixed(6)),
-      bankerProb:   parseFloat((bankerProb * 100).toFixed(2)),
-      playerProb:   parseFloat((playerProb * 100).toFixed(2)),
-      tieProb:      parseFloat((tieProb * 100).toFixed(2)),
-      bankerEdge:   parseFloat((bankerProb - playerProb).toFixed(6)),
-      playerEdge:   parseFloat((playerProb - bankerProb).toFixed(6)),
+      banker:         parseFloat(bankerEV.toFixed(6)),
+      player:         parseFloat(playerEV.toFixed(6)),
+      tie:            parseFloat(tieEV.toFixed(6)),
+      super6:         super6EV,
+      bankerProb:     parseFloat((bankerProb * 100).toFixed(2)),
+      playerProb:     parseFloat((playerProb * 100).toFixed(2)),
+      tieProb:        parseFloat((tieProb * 100).toFixed(2)),
+      bankerEdge:     parseFloat((bankerProb - playerProb).toFixed(6)),
+      playerEdge:     parseFloat((playerProb - bankerProb).toFixed(6)),
       remainingCards: remaining,
       penetration,
-      handCount: this.handCount
+      shoeConfidence,
+      handCount:      this.handCount
     };
   }
 
