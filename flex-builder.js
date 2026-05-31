@@ -424,7 +424,7 @@ function buildHandResultFlex(engine, mtInfo, detail) {
           // 統計
           {
             type: 'text',
-            text: `莊${dispStats.banker} 閒${dispStats.player} 和${dispStats.tie} 共${total}局  |  EV 莊${evB}/閒${evP}`,
+            text: `莊${dispStats.banker} 閒${dispStats.player} 和${dispStats.tie} 共${total}局  |  EV ${predLabel}${pred.result === 'B' ? evB : evP}`,
             size: 'xs', color: '#888888', wrap: true
           }
         ].filter(Boolean)
