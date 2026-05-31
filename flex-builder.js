@@ -421,11 +421,23 @@ function buildHandResultFlex(engine, mtInfo, detail) {
             ]
           },
           { type: 'separator' },
-          // 統計
+          // 統計 + EV 佔優方
           {
             type: 'text',
-            text: `莊${dispStats.banker} 閒${dispStats.player} 和${dispStats.tie} 共${total}局  |  EV 莊${evB}/閒${evP}`,
-            size: 'xs', color: '#888888', wrap: true
+            text: (() => {
+              const statsLine = dispStats
+                ? `莊${dispStats.banker} 閒${dispStats.player} 和${dispStats.tie} 共${total}局`
+                : '';
+              if (ev && typeof ev.banker === 'number' && typeof ev.player === 'number') {
+                const favor = ev.player > ev.banker ? '閒' : '莊';
+                const favorEV = ev.player > ev.banker ? ev.player : ev.banker;
+                const otherEV = ev.player > ev.banker ? ev.banker : ev.player;
+                const evLine = `牌靴: ${favor}佔優(+${(favorEV * 100).toFixed(2)}%) 另方(${(otherEV * 100).toFixed(2)}%)`;
+                return statsLine ? `${statsLine}\n${evLine}` : evLine;
+              }
+              return statsLine;
+            })(),
+            size: 'xs', color: '#666666', wrap: true
           }
         ].filter(Boolean)
       },
