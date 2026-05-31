@@ -1191,6 +1191,10 @@ function startKeepAlive() {
 
 // ===== 啟動伺服器 =====
 const PORT = process.env.PORT || 3000;
+
+// 先從 Firebase 載入用戶/序號資料，再開始監聽
+userManager.init().catch(e => console.error('UserManager Firebase init error:', e.message));
+
 server.listen(PORT, () => {
   console.log(`🎰 百家之眼 - 全廳監控系統`);
   console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━`);

@@ -25,3 +25,7 @@ services:
         sync: false
       - key: MT_PAGE_URL
         value: https://gsa.ofalive99.net
+      - key: FIREBASE_DATABASE_URL
+        value: https://evmtpro-default-rtdb.asia-southeast1.firebasedatabase.app
+      - key: FIREBASE_SERVICE_ACCOUNT
+        sync: false
