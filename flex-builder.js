@@ -388,8 +388,8 @@ function buildHandResultFlex(engine, mtInfo, detail) {
     ? { banker: mtInfo.summary.banker || 0, player: mtInfo.summary.player || 0, tie: mtInfo.summary.tie || 0 }
     : null;
   const total = dispStats ? (dispStats.banker + dispStats.player + dispStats.tie) : null;
-  const evB = (ev && ev.banker != null) ? `+${Math.abs(ev.banker).toFixed(4)}` : '-';
-  const evP = (ev && ev.player != null) ? `+${Math.abs(ev.player).toFixed(4)}` : '-';
+  const evB = (ev && ev.banker != null) ? (ev.banker >= 0 ? `+${ev.banker.toFixed(4)}` : ev.banker.toFixed(4)) : '-';
+  const evP = (ev && ev.player != null) ? (ev.player >= 0 ? `+${ev.player.toFixed(4)}` : ev.player.toFixed(4)) : '-';
 
   const hasCards = detail && detail.playerCards && detail.playerCards.length >= 2;
 
