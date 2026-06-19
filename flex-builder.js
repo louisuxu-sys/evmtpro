@@ -178,21 +178,18 @@ function predictNext(history, stats, ev) {
   const edge = (winScore * 2 - totalScore) / totalScore; // 0~1
   let confidence = Math.round(Math.min(85, 51 + edge * 34));
 
-  // ── EV 微調（最多 ±10%，不再主導方向）──
+  // ── EV 純信心微調（永遠不改方向）──
+  // 百家樂閒EV幾乎永遠優於莊（因抽水），若允許EV覆蓋方向會導致永遠推閒
   if (ev && typeof ev.banker === 'number' && typeof ev.player === 'number') {
     const evFavorsB = ev.banker > ev.player;
     const evDiff = Math.min(Math.abs(ev.banker - ev.player), 0.005);
     const weight = ev.shoeConfidence || 0.3;
-    const evBoost = Math.min(10, Math.round(evDiff * 5000 * weight));
+    const evBoost = Math.min(8, Math.round(evDiff * 4000 * weight));
 
     if ((evFavorsB && predicted === 'B') || (!evFavorsB && predicted === 'P')) {
-      confidence = Math.min(88, confidence + evBoost);
-    } else if (evDiff > 0.003 && (ev.shoeConfidence || 0) > 0.4) {
-      // EV 信心夠強且方向不同 → 覆蓋多因子結論
-      predicted = evFavorsB ? 'B' : 'P';
-      confidence = Math.max(51, confidence - 5);
+      confidence = Math.min(88, confidence + evBoost); // EV 同向 → 加信心
     } else {
-      confidence = Math.max(51, confidence - 3);
+      confidence = Math.max(51, confidence - 3); // EV 反向 → 略降信心，但不改方向
     }
   }
 
