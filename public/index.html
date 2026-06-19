@@ -1292,11 +1292,12 @@ function createTableCard(table) {
         `<div class="bead-cell ${r}">${r === 'B' ? '莊' : r === 'P' ? '閒' : '和'}</div>`
     ).join('');
 
-    // 最近一手牌型顯示
+    // 最近一手牌型顯示（優先找最新一筆有牌面資料的記錄）
     let lastHandHTML = '';
     if (table.handDetails && table.handDetails.length > 0) {
-        const last = table.handDetails[table.handDetails.length - 1];
-        if (last.playerCards.length > 0) {
+        const last = [...table.handDetails].reverse().find(d => d.playerCards && d.playerCards.length > 0)
+            || table.handDetails[table.handDetails.length - 1];
+        if (last && last.playerCards.length > 0) {
             const pCards = last.playerCards.map(c => formatCardInline(c)).join(' ');
             const bCards = last.bankerCards.map(c => formatCardInline(c)).join(' ');
             let tags = '';

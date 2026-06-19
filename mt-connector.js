@@ -1408,7 +1408,7 @@ class MTConnector extends EventEmitter {
           const hasRealCardNow = (d.P1C && typeof d.P1C === 'string' && !d.P1C.startsWith('**')) ||
                                  (d.B1C && typeof d.B1C === 'string' && !d.B1C.startsWith('**'));
           if (!hasRealCardNow && d.P1 === undefined) {
-            this._processDDRound(tableId, lastRound, summary);
+            this._processDDRound(tableId, lastRound, summary, roundKey);
           }
         }
       }
@@ -1420,20 +1420,26 @@ class MTConnector extends EventEmitter {
     // 帶牌面的開牌結果 — 只在有實際牌碼（未遮蔽）時才處理
     const hasRealCard = (d.P1C && typeof d.P1C === 'string' && !d.P1C.startsWith('**')) ||
                         (d.B1C && typeof d.B1C === 'string' && !d.B1C.startsWith('**'));
+    // 計算本訊息的局號 key（供 FullResult 使用，避免 d.A 為 null 時失效）
+    const msgRoundKey = d.A != null ? d.A : d.I != null ? d.I
+      : (d.List && d.List.length > 0 ? this._lastRound[tableId] : null);
     if (hasRealCard || d.P1 !== undefined) {
-      this._processDDFullResult(tableId, d);
+      this._processDDFullResult(tableId, d, msgRoundKey);
     }
   }
 
   // 處理 DD 單局結果
-  _processDDRound(tableId, round, summary) {
+  _processDDRound(tableId, round, summary, roundKey) {
     if (!round) return;
     const winner = this._normalizeG(round.G);
+    // 用 roundKey（多欄位備援），確保不因 A 欄位為 null 而讓 server 端去抖失效
+    const resolvedRound = roundKey !== undefined ? roundKey
+      : (round.A ?? round.N ?? round.R ?? round.I ?? null);
     // 沒有牌面資料，但仍然發出 game_result（讓 EV 計算繼續）
     this.emit('game_result', {
       tableId,
       shoe: null,
-      round: round.A,
+      round: resolvedRound,
       playerCards: [],
       bankerCards: [],
       playerTotal: 0,
@@ -1478,13 +1484,12 @@ class MTConnector extends EventEmitter {
   }
 
   // 處理 DD 完整開牌結果（帶 6 張牌面）
-  _processDDFullResult(tableId, d) {
+  _processDDFullResult(tableId, d, roundKey) {
     let playerCards = [];
     let bankerCards = [];
 
-    // 優先使用新格式 P1C/P2C/P3C/B1C/B2C/B3C ("7D-hash" 編碼)
+    // 新格式 P1C/B1C（帶哈希的牌碼字串）
     if (d.P1C !== undefined || d.B1C !== undefined) {
-      // 記錄原始牌碼供花色除錯（每局都印）
       console.log(`🔍 RAW P1C="${d.P1C}" P2C="${d.P2C}" P3C="${d.P3C}" B1C="${d.B1C}" B2C="${d.B2C}" B3C="${d.B3C}"`);
       const p1 = this._decodeDDCard(d.P1C);
       const p2 = this._decodeDDCard(d.P2C);
@@ -1494,29 +1499,23 @@ class MTConnector extends EventEmitter {
       const b3 = this._decodeDDCard(d.B3C);
       playerCards = [p1, p2, p3].filter(c => c);
       bankerCards = [b1, b2, b3].filter(c => c);
+      const roundNum = roundKey !== undefined && roundKey !== null ? roundKey : (d.A || d.I || null);
 
       if (playerCards.length >= 2 && bankerCards.length >= 2) {
-        // 百家樂點數: A=1, 2-9=面值, 10/J/Q/K=0
         const bacVal = r => (r >= 10 ? 0 : r);
         const playerTotal = playerCards.reduce((s, c) => (s + bacVal(c.rank)) % 10, 0);
         const bankerTotal = bankerCards.reduce((s, c) => (s + bacVal(c.rank)) % 10, 0);
-        // 從牌面計算勝負（比 WF 欄位更可靠）
         const winner = playerTotal === bankerTotal ? 'T' : bankerTotal > playerTotal ? 'B' : 'P';
-        // 記錄 WF 值供除錯
         if (d.WF !== undefined && !this._wfLogged) { this._wfLogged = true; console.log(`📊 WF樣本: "${d.WF}" | computed=${winner}`); }
-        const roundNum = d.A || d.I || null;
+        // 注意：此處 log 用標準花色（c=♣,d=♦），SUIT_INFO 顯示層是 c↔d 互換（法語 Carreau/Trèfle 對應）
         const _fmt = c => { const s={s:'♠',h:'♥',c:'♣',d:'♦'},r={1:'A',11:'J',12:'Q',13:'K'}; return `${s[c.suit]||'?'}${r[c.rank]||c.rank}`; };
-        console.log(`🃏 DD開牌: ${tableId} 第${roundNum}局 ` +
-          `閒[${playerCards.map(_fmt).join(' ')}]=${playerTotal} ` +
-          `莊[${bankerCards.map(_fmt).join(' ')}]=${bankerTotal} ` +
-          `→ ${winner === 'B' ? '莊贏' : winner === 'P' ? '閒贏' : '和'}`);
-        this.emit('game_result', {
-          tableId, shoe: null, round: roundNum,
-          playerCards, bankerCards, playerTotal, bankerTotal,
-          winner, playerPair: !!d.PP, bankerPair: !!d.BP,
-        });
-        return;
+        console.log(`🃏 DD開牌: ${tableId} 第${roundNum}局 閒[${playerCards.map(_fmt).join(' ')}]=${playerTotal} 莊[${bankerCards.map(_fmt).join(' ')}]=${bankerTotal} → ${winner === 'B' ? '莊贏' : winner === 'P' ? '閒贏' : '和'}`);
+        this.emit('game_result', { tableId, shoe: null, round: roundNum, playerCards, bankerCards, playerTotal, bankerTotal, winner, playerPair: !!d.PP, bankerPair: !!d.BP });
+      } else {
+        // 部分解碼失敗：記錄警告，不往下觸發 List 歷史路徑（否則會重複計數舊局）
+        console.warn(`⚠️ P1C解碼不完整: ${tableId} 閒=${playerCards.length}張 莊=${bankerCards.length}張，本局暫無牌面`);
       }
+      return; // P1C 路徑終止，不論成敗都不再 fallthrough 到 List
     }
 
     // 舊格式：P1/P2/P3 為數字

@@ -122,34 +122,56 @@ mtConnector.on('game_result', (data) => {
   const engine = tables.get(localId);
   const hasCards = data.playerCards && data.playerCards.length >= 2;
 
-  // 重複去抖：若牌面資料在同一手到達兩次（先無牌後有牌），只更新牌面，不重複計數
-  const lastDetail = engine.handDetails[engine.handDetails.length - 1];
-  const recentMs = Date.now() - (engine._lastHandTime || 0);
-  if (hasCards && lastDetail && recentMs < 8000 &&
-      (!lastDetail.playerCards || lastDetail.playerCards.length < 2) &&
-      lastDetail.result === data.winner) {
-    // 只補牌面，不新增一手
-    lastDetail.playerCards = data.playerCards;
-    lastDetail.bankerCards = data.bankerCards || [];
-    lastDetail.playerTotal = data.playerTotal || 0;
-    lastDetail.bankerTotal = data.bankerTotal || 0;
-    console.log(`🃏 補牌面: 第${localId}廳 第${engine.handCount}局`);
-    broadcastWS({ type: 'update', tableId: localId, state: engine.getState() });
-    pushToFollowers(data.tableId, localId, engine, engine.calculateEV(), lastDetail);
-    return;
+  // ===== 強化去抖：往回掃最多 5 筆，找最佳匹配目標 =====
+  // 優先：局號完全相符 → 次優：同勝負+無牌+60 秒內（連莊/連閒補牌較晚到的情境）
+  if (hasCards) {
+    let targetDetail = null;
+    const now = Date.now();
+    const scanEnd = Math.max(0, engine.handDetails.length - 5);
+    for (let i = engine.handDetails.length - 1; i >= scanEnd; i--) {
+      const d = engine.handDetails[i];
+      if (!d.playerCards || d.playerCards.length < 2) {
+        if (data.round != null && d._roundKey != null &&
+            String(data.round) === String(d._roundKey)) {
+          targetDetail = d; // 精確局號匹配，最高優先
+          break;
+        }
+        if (d.result === data.winner) {
+          const ms = now - (d._recordedAt || 0);
+          if (ms < 60000 && !targetDetail) {
+            targetDetail = d; // 時間窗口備援，取最近一筆
+          }
+        }
+      }
+    }
+    if (targetDetail) {
+      targetDetail.playerCards = data.playerCards;
+      targetDetail.bankerCards = data.bankerCards || [];
+      targetDetail.playerTotal = data.playerTotal || 0;
+      targetDetail.bankerTotal = data.bankerTotal || 0;
+      console.log(`🃏 補牌面: 第${localId}廳 hand=${targetDetail.hand} round=${data.round}`);
+      broadcastWS({ type: 'update', tableId: localId, state: engine.getState() });
+      pushToFollowers(data.tableId, localId, engine, engine.calculateEV(), targetDetail);
+      return;
+    }
   }
 
-  engine._lastHandTime = Date.now();
   const ev = engine.recordHand(data.winner, data.playerCards, data.bankerCards);
   const state = engine.getState();
+  // 新記錄的 detail 附上局號 & 時間戳，供往後去抖查找
+  const newDetail = state.handDetails[state.handDetails.length - 1];
+  newDetail._roundKey = data.round;
+  newDetail._recordedAt = Date.now();
 
   // 廣播到前端
   broadcastWS({ type: 'update', tableId: localId, state });
 
-  // 不自動推送（用戶需點「繼續分析」按鈕才回展）；內部引擎持續記錄牌路
-
   if (!data.isHistory) {
-    console.log(`✅ 第${localId}廳 ${engine.tableName} 第${engine.handCount}局`);
+    console.log(`✅ 第${localId}廳 ${engine.tableName} 第${engine.handCount}局 round=${data.round}`);
+    // 有完整牌面時自動推送給跟隨者（限速由 pushCooldown 控制，10s/人）
+    if (hasCards) {
+      pushToFollowers(data.tableId, localId, engine, ev, newDetail);
+    }
   }
 });
 
@@ -439,7 +461,10 @@ async function handleLineEvent(event) {
       const mtInfo = mtId ? mtConnector.tables.get(mtId) : null;
       try {
         const state = engine.getState();
-        const lastDetail = state.handDetails[state.handDetails.length - 1];
+        // 永遠取最後一手（結果最新）；若牌面尚未到達，flex 會自動省略牌行，等補牌推送再顯示
+        const lastDetail = state.handDetails.length > 0
+          ? state.handDetails[state.handDetails.length - 1]
+          : null;
         if (lastDetail) {
           // 有牌面資料 → 直接顯示最新一手結果卡片
           const flex = buildHandResultFlex(engine, mtInfo, lastDetail);
@@ -503,7 +528,10 @@ async function handleLineEvent(event) {
       return;
     }
     const st = eng.getState();
-    const lastD = st.handDetails[st.handDetails.length - 1];
+    // 永遠取最後一手（結果最新）；無牌則 flex 省略牌行
+    const lastD = st.handDetails.length > 0
+      ? st.handDetails[st.handDetails.length - 1]
+      : null;
     if (!lastD) {
       await replyMessage(replyToken, `「${eng.tableName}」尚無開牌記錄，請稍後再詢。`);
       return;

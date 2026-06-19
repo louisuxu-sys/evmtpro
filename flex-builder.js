@@ -421,7 +421,7 @@ function buildHandResultFlex(engine, mtInfo, detail) {
               { type: 'text', text: winLabel, size: 'lg', weight: 'bold', color: winColor, flex: 1, align: 'end' }
             ]
           },
-          hasCards ? buildColoredCardRow('閒', detail.playerCards) : null,
+          hasCards ? buildColoredCardRow('閒', detail.playerCards) : { type: 'text', text: '⏳ 牌面傳輸中...', size: 'xs', color: '#aaaaaa' },
           hasCards ? buildColoredCardRow('\u838a', detail.bankerCards) : null,
           { type: 'separator' },
           // 下手預測
