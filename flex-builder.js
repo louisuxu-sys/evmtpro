@@ -122,7 +122,8 @@ function predictNext(history, stats, ev) {
     else break;
   }
 
-  let bScore = 0, pScore = 0;
+  // 基底分 8/8：確保任何單一因子的 edge < 1，信心有梯度而非二元跳躍
+  let bScore = 8, pScore = 8;
 
   // ── 1. 連龍動能 ──
   const streakPts = streakLen >= 6 ? 40 : streakLen >= 5 ? 35
@@ -173,7 +174,7 @@ function predictNext(history, stats, ev) {
 
   // ── 綜合判斷 ──
   let predicted = bScore >= pScore ? 'B' : 'P';
-  const totalScore = bScore + pScore || 1;
+  const totalScore = bScore + pScore; // 基底保證 >= 16，不需要 || 1
   const winScore = Math.max(bScore, pScore);
   const edge = (winScore * 2 - totalScore) / totalScore; // 0~1
   let confidence = Math.round(Math.min(85, 51 + edge * 34));
