@@ -461,16 +461,15 @@ async function handleLineEvent(event) {
       const mtInfo = mtId ? mtConnector.tables.get(mtId) : null;
       try {
         const state = engine.getState();
-        // 永遠取最後一手（結果最新）；若牌面尚未到達，flex 會自動省略牌行，等補牌推送再顯示
-        const lastDetail = state.handDetails.length > 0
-          ? state.handDetails[state.handDetails.length - 1]
-          : null;
+        // 優先取最後一手有完整牌面的 detail；若都無牌面則退而取最後一手
+        const lastDetail = state.handDetails.slice().reverse().find(
+          d => d.playerCards && d.playerCards.length >= 2
+        ) || (state.handDetails.length > 0 ? state.handDetails[state.handDetails.length - 1] : null);
         if (lastDetail) {
-          // 有牌面資料 → 直接顯示最新一手結果卡片
           const flex = buildHandResultFlex(engine, mtInfo, lastDetail);
           await replyFlex(replyToken, flex, targetId);
         } else {
-          // 尚無開牌紀錄 → 簡單提示
+          // 尚無任何開牌紀錄 → 簡單提示
           await replyMessage(replyToken,
             `✅ 已跟隨「${engine.tableName}」\n荷官: ${state.dealer || '-'}\n⏳ 等待下一手開牌...\n\n點「繼續分析」或輸入「分析${engine.tableName.replace('百家樂 ', '')}」查看完整分析`);
         }
@@ -528,10 +527,10 @@ async function handleLineEvent(event) {
       return;
     }
     const st = eng.getState();
-    // 永遠取最後一手（結果最新）；無牌則 flex 省略牌行
-    const lastD = st.handDetails.length > 0
-      ? st.handDetails[st.handDetails.length - 1]
-      : null;
+    // 優先取最後一手有完整牌面的 detail；若都無牌面則退而取最後一手
+    const lastD = st.handDetails.slice().reverse().find(
+      d => d.playerCards && d.playerCards.length >= 2
+    ) || (st.handDetails.length > 0 ? st.handDetails[st.handDetails.length - 1] : null);
     if (!lastD) {
       await replyMessage(replyToken, `「${eng.tableName}」尚無開牌記錄，請稍後再詢。`);
       return;
