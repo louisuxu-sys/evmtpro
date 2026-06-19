@@ -108,7 +108,7 @@ function buildBigRoadFlex(bigRoad) {
   return [{ type: 'box', layout: 'horizontal', contents: colBoxes, spacing: 'xs', paddingAll: 'xs', backgroundColor: '#F8F9FA', cornerRadius: 'md' }];
 }
 
-// ===== 預測演算法（EV 加權版）=====
+// ===== 預測演算法（多因子評分版）=====
 function predictNext(history, stats, ev) {
   const nonTie = history.filter(h => h !== 'T');
   if (nonTie.length < 3) {
@@ -122,48 +122,81 @@ function predictNext(history, stats, ev) {
     else break;
   }
 
-  let predicted, confidence, betSize;
+  let bScore = 0, pScore = 0;
 
-  if (streakLen >= 5) {
-    predicted = last; confidence = Math.min(82, 62 + streakLen * 3); betSize = 3;
-  } else if (streakLen >= 3) {
-    predicted = last; confidence = 55 + streakLen * 5; betSize = 2; // 3→70, 4→75
-  } else if (streakLen >= 2) {
-    predicted = last; confidence = 62; betSize = 2;
-  } else {
-    const tail = nonTie.slice(-4);
-    const isAlt = tail.length >= 4 && tail.every((v, i, a) => i === 0 || v !== a[i - 1]);
-    if (isAlt) {
-      predicted = last === 'B' ? 'P' : 'B'; confidence = 65; betSize = 2;
-    } else {
-      const total = stats.banker + stats.player;
-      const bRate = total > 0 ? stats.banker / total : 0.5;
-      predicted = bRate > 0.52 ? 'P' : 'B';
-      confidence = 55; betSize = 1;
+  // ── 1. 連龍動能 ──
+  const streakPts = streakLen >= 6 ? 40 : streakLen >= 5 ? 35
+    : streakLen >= 4 ? 28 : streakLen >= 3 ? 22 : streakLen >= 2 ? 14 : 0;
+  if (last === 'B') bScore += streakPts; else pScore += streakPts;
+
+  // ── 2. 交替型態（單跳）──
+  const tail4 = nonTie.slice(-4);
+  if (tail4.length === 4 && tail4.every((v, i, a) => i === 0 || v !== a[i - 1])) {
+    if (last === 'B') pScore += 20; else bScore += 20;
+  }
+
+  // ── 3. 歷史同型態比對 ──
+  // 取最後 LOOK 手為模板，在本靴歷史中找相同型態後接了什麼
+  const LOOK = Math.min(4, Math.max(2, Math.floor(nonTie.length / 4)));
+  if (nonTie.length >= LOOK * 2 + 2) {
+    const pattern = nonTie.slice(-LOOK);
+    let hitB = 0, hitP = 0;
+    for (let i = 0; i <= nonTie.length - LOOK - 1; i++) {
+      if (nonTie.slice(i, i + LOOK).every((v, j) => v === pattern[j])) {
+        const next = nonTie[i + LOOK];
+        if (next === 'B') hitB++;
+        else if (next === 'P') hitP++;
+      }
+    }
+    const hits = hitB + hitP;
+    if (hits >= 3) {
+      const ratio = Math.max(hitB, hitP) / hits;
+      const w = Math.min(1, (hits - 2) / 6); // 命中越多權重越高
+      const pts = Math.round((ratio - 0.5) * 2 * 25 * w);
+      if (hitB > hitP) bScore += pts; else pScore += pts;
     }
   }
 
-  // ── EV 最終決定 ──
+  // ── 4. 近期走勢回歸（最後 20 手）──
+  const recent = nonTie.slice(-20);
+  const rBRate = recent.filter(h => h === 'B').length / recent.length;
+  if (rBRate > 0.60) pScore += 8;
+  else if (rBRate < 0.40) bScore += 8;
+
+  // ── 5. 全局偏差修正 ──
+  const gTotal = (stats.banker || 0) + (stats.player || 0);
+  if (gTotal >= 20) {
+    const bGRate = (stats.banker || 0) / gTotal;
+    if (bGRate > 0.55) pScore += 5;
+    else if (bGRate < 0.45) bScore += 5;
+  }
+
+  // ── 綜合判斷 ──
+  let predicted = bScore >= pScore ? 'B' : 'P';
+  const totalScore = bScore + pScore || 1;
+  const winScore = Math.max(bScore, pScore);
+  const edge = (winScore * 2 - totalScore) / totalScore; // 0~1
+  let confidence = Math.round(Math.min(85, 51 + edge * 34));
+
+  // ── EV 微調（最多 ±10%，不再主導方向）──
   if (ev && typeof ev.banker === 'number' && typeof ev.player === 'number') {
     const evFavorsB = ev.banker > ev.player;
-    // EV 差距上限 0.005，避免極端值主導一切；最多加 +12%
     const evDiff = Math.min(Math.abs(ev.banker - ev.player), 0.005);
     const weight = ev.shoeConfidence || 0.3;
-    const evBoost = Math.min(12, Math.round(evDiff * 6000 * weight));
+    const evBoost = Math.min(10, Math.round(evDiff * 5000 * weight));
 
-    if (evFavorsB && predicted === 'B') {
+    if ((evFavorsB && predicted === 'B') || (!evFavorsB && predicted === 'P')) {
       confidence = Math.min(88, confidence + evBoost);
-    } else if (!evFavorsB && predicted === 'P') {
-      confidence = Math.min(88, confidence + evBoost);
-    } else if (evFavorsB && predicted === 'P') {
-      predicted = 'B';
-      confidence = Math.max(51, confidence - 8);
-    } else if (!evFavorsB && predicted === 'B') {
-      predicted = 'P';
-      confidence = Math.max(51, confidence - 8);
+    } else if (evDiff > 0.003 && (ev.shoeConfidence || 0) > 0.4) {
+      // EV 信心夠強且方向不同 → 覆蓋多因子結論
+      predicted = evFavorsB ? 'B' : 'P';
+      confidence = Math.max(51, confidence - 5);
+    } else {
+      confidence = Math.max(51, confidence - 3);
     }
   }
 
+  const betSize = confidence >= 78 ? 3 : confidence >= 68 ? 2 : 1;
   return { result: predicted, confidence, betSize, streakLen, streakLast: last };
 }
 
