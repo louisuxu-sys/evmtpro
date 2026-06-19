@@ -1,4 +1,4 @@
-/**
+﻿/**
  * MT 平台自動連線器 (Puppeteer + CDP + 遠端登入)
  * 在雲端（Render）用 headless 瀏覽器連接 MT
  * 提供遠端登入介面讓管理者透過網頁操作瀏覽器登入
@@ -1473,8 +1473,8 @@ class MTConnector extends EventEmitter {
     if (code.length < 2) return null;
     const suitChar = code[code.length - 1].toUpperCase();
     const rankStr = code.substring(0, code.length - 1).toUpperCase();
-    // 標準英式花色 (顯示層 SUIT_INFO 已對調 c↔d)
-    const suitMap = { 'S': 's', 'H': 'h', 'C': 'c', 'D': 'd', 'T': 'c' };
+    // C=法式Carreau(♦) → 'd', D=fallback(♣) → 'c', T=法式Trèfle(♣) → 'c'
+    const suitMap = { 'S': 's', 'H': 'h', 'C': 'd', 'D': 'c', 'T': 'c' };
     const rankMap = { 'A': 1, 'J': 11, 'Q': 12, 'K': 13 };
     const suit = suitMap[suitChar];
     if (!suit) { console.warn(`⚠️ 未知花色字元: "${suitChar}" in "${codeStr}" (原始: ${JSON.stringify(codeStr)})`); return null; }
@@ -1586,7 +1586,7 @@ class MTConnector extends EventEmitter {
     }
     // 如果是陣列 [花色索引, 點數] — 平台索引: 0=♠ 1=♥ 2=♦ 3=♣
     if (Array.isArray(c) && c.length >= 2) {
-      const suits = ['s', 'h', 'c', 'd'];  // 2=♣(\u6885\u82b1), 3=♦(\u65b9\u584a) \u2014\u6a19\u6e96\u7d22\u5f15
+      const suits = ['s', 'h', 'd', 'c'];  // 2=方塊(♦), 3=梅花(♣)
       return { rank: parseInt(c[1]) || 0, suit: suits[parseInt(c[0])] || 's' };
     }
     return null;
@@ -1995,7 +1995,7 @@ class MTConnector extends EventEmitter {
   decodeCardNumber(num) {
     if (num <= 0 || num > 52) return null;
     const idx = num - 1; // 轉為 0-indexed
-    const suits = ['s', 'h', 'c', 'd'];
+    const suits = ['s', 'h', 'd', 'c'];
     const suit = suits[Math.floor(idx / 13)] || 's';
     const rank = (idx % 13) + 1; // 1=A, 2-10, 11=J, 12=Q, 13=K
     return { rank, suit };
