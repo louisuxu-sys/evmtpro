@@ -125,11 +125,11 @@ function predictNext(history, stats, ev) {
   let predicted, confidence, betSize;
 
   if (streakLen >= 5) {
-    predicted = last; confidence = Math.min(88, 68 + streakLen * 3); betSize = 3;
+    predicted = last; confidence = Math.min(82, 62 + streakLen * 3); betSize = 3;
   } else if (streakLen >= 3) {
-    predicted = last; confidence = 72; betSize = 2;
+    predicted = last; confidence = 55 + streakLen * 5; betSize = 2; // 3→70, 4→75
   } else if (streakLen >= 2) {
-    predicted = last; confidence = 63; betSize = 2;
+    predicted = last; confidence = 62; betSize = 2;
   } else {
     const tail = nonTie.slice(-4);
     const isAlt = tail.length >= 4 && tail.every((v, i, a) => i === 0 || v !== a[i - 1]);
@@ -144,25 +144,21 @@ function predictNext(history, stats, ev) {
   }
 
   // ── EV 最終決定 ──
-  // EV 是最終裁判：若走勢與 EV 方向不符，以 EV 為準並調整信心值
   if (ev && typeof ev.banker === 'number' && typeof ev.player === 'number') {
     const evFavorsB = ev.banker > ev.player;
-    const evDiff = Math.abs(ev.banker - ev.player);
+    // EV 差距上限 0.005，避免極端值主導一切；最多加 +12%
+    const evDiff = Math.min(Math.abs(ev.banker - ev.player), 0.005);
     const weight = ev.shoeConfidence || 0.3;
-    const evBoost = Math.round(evDiff * 8000 * weight);
+    const evBoost = Math.min(12, Math.round(evDiff * 6000 * weight));
 
     if (evFavorsB && predicted === 'B') {
-      // 走勢與 EV 同向 → 提升信心
-      confidence = Math.min(92, confidence + evBoost);
+      confidence = Math.min(88, confidence + evBoost);
     } else if (!evFavorsB && predicted === 'P') {
-      // 走勢與 EV 同向 → 提升信心
-      confidence = Math.min(92, confidence + evBoost);
+      confidence = Math.min(88, confidence + evBoost);
     } else if (evFavorsB && predicted === 'P') {
-      // 走勢說閒但 EV 說莊 → 改為推薦莊，信心稍降
       predicted = 'B';
       confidence = Math.max(51, confidence - 8);
     } else if (!evFavorsB && predicted === 'B') {
-      // 走勢說莊但 EV 說閒 → 改為推薦閒，信心稍降
       predicted = 'P';
       confidence = Math.max(51, confidence - 8);
     }
