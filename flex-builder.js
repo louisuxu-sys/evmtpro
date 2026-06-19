@@ -436,7 +436,9 @@ function buildHandResultFlex(engine, mtInfo, detail) {
           // 統計
           {
             type: 'text',
-            text: `莊${dispStats.banker} 閒${dispStats.player} 和${dispStats.tie} 共${total}局  |  EV 莊${evB}/閒${evP}`,
+            text: dispStats
+              ? `莊${dispStats.banker} 閒${dispStats.player} 和${dispStats.tie} 共${total}局  |  EV 莊${evB}/閒${evP}`
+              : `EV 莊${evB}/閒${evP}`,
             size: 'xs', color: '#888888', wrap: true
           }
         ].filter(Boolean)
@@ -463,8 +465,8 @@ function fmtCards(cards) {
 const SUIT_INFO = {
   s: { sym: '♠', color: '#222222' },
   h: { sym: '♥', color: '#e74c3c' },
-  d: { sym: '\u2663', color: '#222222' },
-  c: { sym: '\u2666', color: '#e74c3c' }
+  d: { sym: '\u2666', color: '#e74c3c' },
+  c: { sym: '\u2663', color: '#222222' }
 };
 
 function buildColoredCardRow(label, cards) {
